@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-base.tesseractNode",
+	"node": "n8n-nodes-tesseractjs7",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Development"],

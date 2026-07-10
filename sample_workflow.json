@@ -160,7 +160,7 @@
         "height": 110,
         "options": {}
       },
-      "type": "n8n-nodes-tesseractjs.tesseractNode",
+      "type": "n8n-nodes-tesseractjs7.tesseractNode",
       "typeVersion": 1,
       "position": [
         -640,
