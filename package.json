@@ -1,0 +1,60 @@
+{
+	"name": "n8n-nodes-tesseractjs7",
+	"version": "1.0.0",
+	"description": "A n8n module that exposes Tesseract.js, an OCR library that can detect text on images",
+	"keywords": [
+		"n8n-community-node-package"
+	],
+	"license": "MIT",
+	"homepage": "https://github.com/privat655/n8n-nodes-tesseractjs7",
+	"author": {
+		"name": "privat655"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/privat655/n8n-nodes-tesseractjs7.git"
+	},
+	"engines": {
+		"node": ">=18.10"
+	},
+	"main": "index.js",
+	"scripts": {
+		"build": "tsc && gulp build:icons",
+		"dev": "tsc --watch",
+		"format": "prettier nodes --write",
+		"lint": "eslint nodes package.json",
+		"lintfix": "eslint nodes package.json --fix",
+		"prepublishOnly": "npm run build && npm run lint -c .eslintrc.prepublish.js nodes package.json",
+		"release": "npm publish"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"credentials": [],
+		"nodes": [
+			"dist/nodes/TesseractNode/TesseractNode.node.js"
+		]
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.2",
+		"@types/pako": "^2.0.4",
+		"@typescript-eslint/parser": "^7.15.0",
+		"eslint": "^8.56.0",
+		"eslint-plugin-n8n-nodes-base": "^1.16.1",
+		"gulp": "^4.0.2",
+		"n8n-workflow": "*",
+		"prettier": "^3.3.2",
+		"typescript": "^5.5.3"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	},
+	"dependencies": {
+		"jimp": "^1.6.0",
+		"pako": "^2.1.0",
+		"pdf-lib": "^1.17.1",
+		"tesseract.js": "^7.0.0"
+	}
+}
