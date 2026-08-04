@@ -1,12 +1,12 @@
 {
 	"node": "n8n-nodes-tesseractjs7",
-	"nodeVersion": "1.0",
+	"nodeVersion": "2.0",
 	"codexVersion": "1.0",
-	"categories": ["Development"],
+	"categories": ["Data & Storage"],
 	"resources": {
 		"primaryDocumentation": [
 			{
-				"url": "https://tesseract.projectnaptha.com/"
+				"url": "https://github.com/privat655/n8n-nodes-tesseractjs7"
 			}
 		]
 	}
