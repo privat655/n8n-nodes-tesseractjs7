@@ -22,8 +22,8 @@
 		"build": "tsc && gulp build:icons",
 		"dev": "tsc --watch",
 		"format": "prettier nodes tests --write",
-		"lint": "eslint nodes tests package.json",
-		"lintfix": "eslint nodes tests package.json --fix",
+		"lint": "eslint --ext .ts nodes tests package.json",
+		"lintfix": "eslint --ext .ts nodes tests package.json --fix",
 		"test": "npm run build && node --test dist/tests/*.test.js",
 		"prepublishOnly": "npm run test && npm run lint -c .eslintrc.prepublish.js nodes package.json",
 		"release": "npm publish"
