@@ -2,7 +2,7 @@
 
 An n8n community node for extracting text from PDF documents.
 
-The node first reads the native text layer of every page. It uses that text only when the complete document contains enough meaningful text and no明显 broken Unicode layer. Otherwise it renders every page at the configured DPI and recognizes the complete document with Tesseract.js.
+The node first reads the native text layer of every page. It uses that text only when the complete document contains enough meaningful text and no clearly broken Unicode layer. Otherwise it renders every page at the configured DPI and recognizes the complete document with Tesseract.js.
 
 ## Behavior
 
