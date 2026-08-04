@@ -5,6 +5,7 @@ import {
 	type INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	NodeConnectionType,
 	NodeOperationError,
 } from 'n8n-workflow';
 import { createWorker, OEM, PSM, type Worker } from 'tesseract.js';
@@ -112,8 +113,10 @@ export class TesseractNode implements INodeType {
 		version: 2,
 		description: 'Extract text from a PDF using its text layer or OCR',
 		defaults: { name: 'PDF Text Recognition' },
-		inputs: ['main'],
-		outputs: ['main'],
+		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
+		inputs: [NodeConnectionType.Main],
+		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
+		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
 				displayName: 'Input PDF Field',
