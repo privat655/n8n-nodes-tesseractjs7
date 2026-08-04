@@ -7,40 +7,20 @@ on:
 
 jobs:
   publish:
-    name: Publish to npm
     runs-on: ubuntu-latest
-
     permissions:
       id-token: write
       contents: read
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           registry-url: 'https://registry.npmjs.org'
-
-      - name: Use npm with trusted publishing support
-        run: npm install -g npm@11.5.1
-
-      - name: Show publishing toolchain
-        run: |
-          node --version
-          npm --version
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Release
-        run: |
-          [ -n "$NPM_TOKEN" ] && npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-          npm run release
+      - run: npm install -g npm@11.5.1
+      - run: npm install
+      - run: npm test
+      - run: npm run lint
+      - run: npm publish --access public
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_ACCESS: public
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
