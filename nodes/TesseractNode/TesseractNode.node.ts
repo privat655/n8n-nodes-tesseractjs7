@@ -25,17 +25,15 @@ type DocumentResult = {
 async function withTimeout<T>(promise: Promise<T>, timeout: number): Promise<T> {
 	if (timeout <= 0) return promise;
 
-	let timer: NodeJS.Timeout;
+	let timer: NodeJS.Timeout | undefined;
 	return Promise.race([
 		promise,
 		new Promise<never>((_, reject) => {
 			timer = setTimeout(() => reject(new Error(`OCR timed out after ${timeout} ms`)), timeout);
 		}),
-	]).finally(() => clearTimeout(timer));
-}
-
-function pageText(items: Awaited<ReturnType<Awaited<ReturnType<typeof import('pdfjs-dist/legacy/build/pdf.mjs')['getDocument']>>['promise']>['getPage']>> extends never ? never : never): string {
-	return String(items);
+	]).finally(() => {
+		if (timer) clearTimeout(timer);
+	});
 }
 
 async function recognizePdf(
@@ -55,9 +53,7 @@ async function recognizePdf(
 			const content = await page.getTextContent();
 			nativePages.push(
 				content.items
-					.map((item) =>
-						'str' in item ? `${item.str}${item.hasEOL ? '\n' : ' '}` : '',
-					)
+					.map((item) => ('str' in item ? `${item.str}${item.hasEOL ? '\n' : ' '}` : ''))
 					.join('')
 					.replace(/[ \t]+\n/g, '\n')
 					.replace(/[ \t]{2,}/g, ' ')
