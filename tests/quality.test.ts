@@ -20,7 +20,7 @@ test('does not OCR a small logo or an empty page', () => {
 });
 
 test('rejects a broken native text layer', () => {
-	assert.equal(recommendPageMode(`Vertragstext ${'�'.repeat(30)}`, 0), 'ocr');
+	assert.equal(recommendPageMode(`${'Vertragstext '.repeat(2)}${'�'.repeat(30)}`, 0), 'ocr');
 });
 
 test('counts German words, numbers and joined identifiers', () => {
