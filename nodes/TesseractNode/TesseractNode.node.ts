@@ -15,11 +15,13 @@ import {
 	extractNativePages,
 	loadPdf,
 	resolvePageRange,
+	resolveSpecificPages,
 	type PageAnalysis,
 	type PdfDocument,
 } from '../shared/pdf';
 
 type RecognitionMode = 'auto' | 'native' | 'ocr';
+type PageSelection = 'range' | 'specific';
 type PageSource = 'native' | 'ocr';
 
 type PageResult = {
@@ -32,7 +34,8 @@ type PageResult = {
 type DocumentResult = {
 	source: PageSource | 'mixed';
 	pageCount: number;
-	range: { from: number; to: number };
+	range?: { from: number; to: number };
+	selectedPages?: number[];
 	pages: PageResult[];
 };
 
@@ -127,15 +130,20 @@ function nativeResults(analyses: PageAnalysis[]): PageResult[] {
 async function recognizePdf(
 	buffer: Buffer,
 	mode: RecognitionMode,
+	pageSelection: PageSelection,
 	pageFrom: number,
 	pageTo: number,
+	specificPages: string,
 	language: string,
 	dpi: number,
 	timeout: number,
 ): Promise<DocumentResult> {
 	const pdf = await loadPdf(buffer);
 	try {
-		const selectedPages = resolvePageRange(pdf.numPages, pageFrom, pageTo);
+		const selectedPages =
+			pageSelection === 'specific'
+				? resolveSpecificPages(pdf.numPages, specificPages)
+				: resolvePageRange(pdf.numPages, pageFrom, pageTo);
 		let pages: PageResult[];
 
 		if (mode === 'ocr') {
@@ -159,7 +167,9 @@ async function recognizePdf(
 		return {
 			source: documentSource(pages),
 			pageCount: pdf.numPages,
-			range: { from: selectedPages[0], to: selectedPages[selectedPages.length - 1] },
+			...(pageSelection === 'specific'
+				? { selectedPages }
+				: { range: { from: selectedPages[0], to: selectedPages[selectedPages.length - 1] } }),
 			pages,
 		};
 	} finally {
@@ -173,8 +183,8 @@ export class TesseractNode implements INodeType {
 		name: 'tesseractNode',
 		icon: 'file:tesseract.svg',
 		group: ['transform'],
-		version: 2.2,
-		description: 'Extract text from PDF pages using their text layer or OCR',
+		version: 2.3,
+		description: 'Extract text from selected PDF pages using their text layer or OCR',
 		defaults: { name: 'PDF Text Recognition' },
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [NodeConnectionType.Main],
@@ -201,11 +211,22 @@ export class TesseractNode implements INodeType {
 				description: 'Auto chooses native text or OCR separately for every selected page',
 			},
 			{
+				displayName: 'Page Selection',
+				name: 'pageSelection',
+				type: 'options',
+				default: 'range',
+				options: [
+					{ name: 'Range', value: 'range' },
+					{ name: 'Specific Pages', value: 'specific' },
+				],
+			},
+			{
 				displayName: 'Page From',
 				name: 'pageFrom',
 				type: 'number',
 				default: 1,
 				typeOptions: { minValue: 1, numberStepSize: 1 },
+				displayOptions: { show: { pageSelection: ['range'] } },
 			},
 			{
 				displayName: 'Page To',
@@ -213,7 +234,17 @@ export class TesseractNode implements INodeType {
 				type: 'number',
 				default: 0,
 				typeOptions: { minValue: 0, numberStepSize: 1 },
+				displayOptions: { show: { pageSelection: ['range'] } },
 				description: 'Use 0 for the last page',
+			},
+			{
+				displayName: 'Pages',
+				name: 'specificPages',
+				type: 'string',
+				default: '',
+				displayOptions: { show: { pageSelection: ['specific'] } },
+				placeholder: '1,5,6',
+				description: 'Comma-separated PDF page numbers, for example 1,5,6',
 			},
 			{
 				displayName: 'Language',
@@ -259,8 +290,10 @@ export class TesseractNode implements INodeType {
 				const result = await recognizePdf(
 					await this.helpers.getBinaryDataBuffer(itemIndex, field),
 					this.getNodeParameter('recognitionMode', itemIndex, 'auto') as RecognitionMode,
+					this.getNodeParameter('pageSelection', itemIndex, 'range') as PageSelection,
 					this.getNodeParameter('pageFrom', itemIndex, 1) as number,
 					this.getNodeParameter('pageTo', itemIndex, 0) as number,
+					this.getNodeParameter('specificPages', itemIndex, '') as string,
 					this.getNodeParameter('language', itemIndex, 'deu') as string,
 					this.getNodeParameter('dpi', itemIndex, 300) as number,
 					this.getNodeParameter('timeout', itemIndex, 120000) as number,

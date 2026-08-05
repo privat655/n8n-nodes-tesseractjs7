@@ -227,3 +227,17 @@ export function resolvePageRange(pageCount: number, pageFrom: number, pageTo: nu
 	if (end > pageCount) throw new Error(`Page To cannot exceed the document page count (${pageCount})`);
 	return Array.from({ length: end - pageFrom + 1 }, (_, index) => pageFrom + index);
 }
+
+export function resolveSpecificPages(pageCount: number, value: string): number[] {
+	if (!value.trim()) throw new Error('Pages must contain at least one page number');
+	const parts = value.split(',').map((part) => part.trim());
+	if (parts.some((part) => !/^\d+$/.test(part))) {
+		throw new Error('Pages must be comma-separated positive integers, for example 1,5,6');
+	}
+	const pages = parts.map(Number);
+	if (pages.some((page) => page < 1)) throw new Error('Pages must contain only integers greater than 0');
+	if (new Set(pages).size !== pages.length) throw new Error('Pages must not contain duplicates');
+	const outside = pages.find((page) => page > pageCount);
+	if (outside) throw new Error(`Page ${outside} cannot exceed the document page count (${pageCount})`);
+	return pages.sort((left, right) => left - right);
+}

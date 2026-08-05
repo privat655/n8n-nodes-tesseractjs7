@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-tesseractjs7",
-	"version": "2.2.0",
+	"version": "2.3.0",
 	"description": "An n8n community node that extracts text from PDFs using their text layer or Tesseract OCR",
 	"keywords": ["n8n-community-node-package"],
 	"license": "MIT",

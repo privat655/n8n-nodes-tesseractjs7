@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolvePageRange } from '../nodes/shared/pdf';
+import { resolvePageRange, resolveSpecificPages } from '../nodes/shared/pdf';
 
 test('resolves the complete document when Page To is zero', () => {
 	assert.deepEqual(resolvePageRange(4, 1, 0), [1, 2, 3, 4]);
@@ -13,4 +13,17 @@ test('resolves an inclusive page range', () => {
 test('rejects ranges outside the document', () => {
 	assert.throws(() => resolvePageRange(5, 1, 6), /page count/);
 	assert.throws(() => resolvePageRange(5, 4, 3), /greater than or equal/);
+});
+
+test('resolves and sorts specific pages', () => {
+	assert.deepEqual(resolveSpecificPages(10, '6, 1,5'), [1, 5, 6]);
+});
+
+test('rejects invalid specific pages', () => {
+	assert.throws(() => resolveSpecificPages(10, ''), /at least one/);
+	assert.throws(() => resolveSpecificPages(10, '1,,5'), /comma-separated/);
+	assert.throws(() => resolveSpecificPages(10, '1.5,2'), /comma-separated/);
+	assert.throws(() => resolveSpecificPages(10, '0,2'), /greater than 0/);
+	assert.throws(() => resolveSpecificPages(10, '2,2'), /duplicates/);
+	assert.throws(() => resolveSpecificPages(5, '1,6'), /page count/);
 });

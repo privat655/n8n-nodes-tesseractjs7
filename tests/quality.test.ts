@@ -2,8 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { countWords, recommendPageMode } from '../nodes/shared/quality';
 
-test('recognizes a scan page with no native text', () => {
-	assert.equal(recommendPageMode('', 1), 'ocr');
+test('OCRs pages without any valid character', () => {
+	assert.equal(recommendPageMode('', 0), 'ocr');
+	assert.equal(recommendPageMode(' \n\t\u0000', 0.02), 'ocr');
+});
+
+test('uses the relevant image rule for symbol-only pages', () => {
+	assert.equal(recommendPageMode('---', 0.2), 'native');
+	assert.equal(recommendPageMode('---', 0.201), 'ocr');
 });
 
 test('recognizes a scan page with only a small footer', () => {
@@ -14,9 +20,8 @@ test('keeps a text page with a full-page background image native', () => {
 	assert.equal(recommendPageMode('Vertrag '.repeat(25), 1), 'native');
 });
 
-test('does not OCR a small logo or an empty page', () => {
-	assert.equal(recommendPageMode('', 0.02), 'native');
-	assert.equal(recommendPageMode('', 0), 'native');
+test('keeps a short text page with a medium image native', () => {
+	assert.equal(recommendPageMode('Hinweis', 0.5), 'native');
 });
 
 test('rejects a broken native text layer', () => {
