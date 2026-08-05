@@ -102,6 +102,8 @@ async function recognizePages(
 					confidence: result.data.confidence,
 				};
 			} catch (error) {
+				// This lower-level helper adds the page number; execute() wraps it in NodeOperationError.
+				// eslint-disable-next-line n8n-nodes-base/node-execute-block-wrong-error-thrown
 				throw new Error(`Failed to OCR PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		});
