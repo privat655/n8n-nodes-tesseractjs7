@@ -7,8 +7,7 @@ import {
 	NodeConnectionType,
 	NodeOperationError,
 } from 'n8n-workflow';
-import { extractNativePages, loadPdf } from '../shared/pdf';
-import { hasUsableNativeText } from '../shared/quality';
+import { analyzePages, loadPdf } from '../shared/pdf';
 
 export class PdfRecognitionPreflight implements INodeType {
 	description: INodeTypeDescription = {
@@ -16,8 +15,8 @@ export class PdfRecognitionPreflight implements INodeType {
 		name: 'pdfRecognitionPreflight',
 		icon: 'file:tesseract.svg',
 		group: ['transform'],
-		version: 1,
-		description: 'Inspect a PDF and recommend native text extraction or OCR',
+		version: 1.1,
+		description: 'Inspect every PDF page and recommend native text extraction or OCR',
 		defaults: { name: 'PDF Recognition Preflight' },
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [NodeConnectionType.Main],
@@ -51,11 +50,18 @@ export class PdfRecognitionPreflight implements INodeType {
 			const pdf = await loadPdf(await this.helpers.getBinaryDataBuffer(itemIndex, field));
 			try {
 				const pageNumbers = Array.from({ length: pdf.numPages }, (_, index) => index + 1);
-				const pages = await extractNativePages(pdf, pageNumbers);
+				const analyses = await analyzePages(pdf, pageNumbers);
+				const modes = new Set(analyses.map((page) => page.recommendedMode));
 				output.push({
 					json: {
 						pageCount: pdf.numPages,
-						recommendedMode: hasUsableNativeText(pages) ? 'native' : 'ocr',
+						recommendedMode: modes.size === 1 ? analyses[0].recommendedMode : 'auto',
+						pages: analyses.map((page) => ({
+							page: page.page,
+							recommendedMode: page.recommendedMode,
+							wordCount: page.wordCount,
+							imageCoverage: Number(page.imageCoverage.toFixed(4)),
+						})),
 					} as IDataObject,
 					binary: items[itemIndex].binary,
 					pairedItem: { item: itemIndex },
