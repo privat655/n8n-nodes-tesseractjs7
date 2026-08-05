@@ -10,19 +10,27 @@ import {
 } from 'n8n-workflow';
 import { createScheduler, createWorker, OEM, PSM, type Scheduler, type Worker } from 'tesseract.js';
 import { mapLimit } from '../shared/concurrency';
-import { extractNativePages, loadPdf, resolvePageRange, type PdfDocument } from '../shared/pdf';
-import { hasUsableNativeText } from '../shared/quality';
+import {
+	analyzePages,
+	extractNativePages,
+	loadPdf,
+	resolvePageRange,
+	type PageAnalysis,
+	type PdfDocument,
+} from '../shared/pdf';
 
 type RecognitionMode = 'auto' | 'native' | 'ocr';
+type PageSource = 'native' | 'ocr';
 
 type PageResult = {
 	page: number;
+	source: PageSource;
 	text: string;
 	confidence?: number;
 };
 
 type DocumentResult = {
-	source: 'native' | 'ocr';
+	source: PageSource | 'mixed';
 	pageCount: number;
 	range: { from: number; to: number };
 	pages: PageResult[];
@@ -73,6 +81,8 @@ async function recognizePages(
 	dpi: number,
 	timeout: number,
 ): Promise<PageResult[]> {
+	if (pageNumbers.length === 0) return [];
+
 	const scheduler = await createOcrScheduler(Math.min(3, pageNumbers.length), language, dpi);
 	try {
 		return await mapLimit(pageNumbers, 3, async (pageNumber) => {
@@ -90,7 +100,12 @@ async function recognizePages(
 					scheduler.addJob('recognize', canvas.toBuffer('image/png'), {}, { text: true }),
 					timeout,
 				);
-				return { page: pageNumber, text: result.data.text, confidence: result.data.confidence };
+				return {
+					page: pageNumber,
+					source: 'ocr',
+					text: result.data.text,
+					confidence: result.data.confidence,
+				};
 			} finally {
 				page.cleanup();
 			}
@@ -98,6 +113,15 @@ async function recognizePages(
 	} finally {
 		await scheduler.terminate();
 	}
+}
+
+function documentSource(pages: PageResult[]): DocumentResult['source'] {
+	const sources = new Set(pages.map((page) => page.source));
+	return sources.size === 1 ? pages[0].source : 'mixed';
+}
+
+function nativeResults(analyses: PageAnalysis[]): PageResult[] {
+	return analyses.map(({ page, text }) => ({ page, source: 'native', text }));
 }
 
 async function recognizePdf(
@@ -112,27 +136,28 @@ async function recognizePdf(
 	const pdf = await loadPdf(buffer);
 	try {
 		const selectedPages = resolvePageRange(pdf.numPages, pageFrom, pageTo);
-		let source: 'native' | 'ocr' = mode === 'ocr' ? 'ocr' : 'native';
-		let nativePages: string[] | undefined;
-
-		if (mode === 'auto') {
-			const allPageNumbers = Array.from({ length: pdf.numPages }, (_, index) => index + 1);
-			nativePages = await extractNativePages(pdf, allPageNumbers);
-			source = hasUsableNativeText(nativePages) ? 'native' : 'ocr';
-		}
-
 		let pages: PageResult[];
-		if (source === 'ocr') {
+
+		if (mode === 'ocr') {
 			pages = await recognizePages(pdf, selectedPages, language, dpi, timeout);
-		} else if (nativePages) {
-			pages = selectedPages.map((page) => ({ page, text: nativePages[page - 1] ?? '' }));
-		} else {
+		} else if (mode === 'native') {
 			const texts = await extractNativePages(pdf, selectedPages);
-			pages = texts.map((text, index) => ({ page: selectedPages[index], text }));
+			pages = texts.map((text, index) => ({ page: selectedPages[index], source: 'native', text }));
+		} else {
+			const analyses = await analyzePages(pdf, selectedPages);
+			const native = nativeResults(analyses.filter((page) => page.recommendedMode === 'native'));
+			const ocr = await recognizePages(
+				pdf,
+				analyses.filter((page) => page.recommendedMode === 'ocr').map((page) => page.page),
+				language,
+				dpi,
+				timeout,
+			);
+			pages = [...native, ...ocr].sort((left, right) => left.page - right.page);
 		}
 
 		return {
-			source,
+			source: documentSource(pages),
 			pageCount: pdf.numPages,
 			range: { from: selectedPages[0], to: selectedPages[selectedPages.length - 1] },
 			pages,
@@ -148,8 +173,8 @@ export class TesseractNode implements INodeType {
 		name: 'tesseractNode',
 		icon: 'file:tesseract.svg',
 		group: ['transform'],
-		version: 2.1,
-		description: 'Extract text from a PDF using its text layer or OCR',
+		version: 2.2,
+		description: 'Extract text from PDF pages using their text layer or OCR',
 		defaults: { name: 'PDF Text Recognition' },
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [NodeConnectionType.Main],
@@ -173,7 +198,7 @@ export class TesseractNode implements INodeType {
 					{ name: 'Native Text', value: 'native' },
 					{ name: 'OCR', value: 'ocr' },
 				],
-				description: 'Auto checks the complete PDF; native and OCR skip that check',
+				description: 'Auto chooses native text or OCR separately for every selected page',
 			},
 			{
 				displayName: 'Page From',
