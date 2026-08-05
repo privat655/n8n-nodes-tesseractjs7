@@ -132,7 +132,7 @@ async function recognizePdf(
 	dpi: number,
 	timeout: number,
 ): Promise<DocumentResult> {
-	const pdf = await loadPdf(buffer);
+	const pdf: PdfDocument = await loadPdf(buffer);
 	try {
 		const selectedPages =
 			pageSelection === 'specific'
