@@ -121,15 +121,15 @@ async function recognizePdf(
 			source = hasUsableNativeText(nativePages) ? 'native' : 'ocr';
 		}
 
-		const pages =
-			source === 'ocr'
-				? await recognizePages(pdf, selectedPages, language, dpi, timeout)
-				: (nativePages
-						? selectedPages.map((page) => ({ page, text: nativePages?.[page - 1] ?? '' }))
-						: (await extractNativePages(pdf, selectedPages)).map((text, index) => ({
-								page: selectedPages[index],
-								text,
-							}));
+		let pages: PageResult[];
+		if (source === 'ocr') {
+			pages = await recognizePages(pdf, selectedPages, language, dpi, timeout);
+		} else if (nativePages) {
+			pages = selectedPages.map((page) => ({ page, text: nativePages[page - 1] ?? '' }));
+		} else {
+			const texts = await extractNativePages(pdf, selectedPages);
+			pages = texts.map((text, index) => ({ page: selectedPages[index], text }));
+		}
 
 		return {
 			source,
