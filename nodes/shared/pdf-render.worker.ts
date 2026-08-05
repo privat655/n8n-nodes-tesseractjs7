@@ -70,8 +70,9 @@ async function start(): Promise<void> {
 		getDocument(options: unknown): { promise: Promise<any> };
 	};
 	const sharedPdf = (workerData as { pdfData: SharedArrayBuffer }).pdfData;
+	const localPdf = Uint8Array.from(new Uint8Array(sharedPdf));
 	const pdf = await pdfjs.getDocument({
-		data: new Uint8Array(sharedPdf),
+		data: localPdf,
 		useSystemFonts: true,
 		CanvasFactory: WorkerCanvasFactory,
 	}).promise;
