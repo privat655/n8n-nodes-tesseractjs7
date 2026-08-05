@@ -1,13 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadPdf, renderPageToPng } from '../nodes/shared/pdf';
+import { IsolatedPdfRenderer } from '../nodes/shared/isolated-renderer';
 
-function createVectorPdf(): Buffer {
+function createComplexVectorPdf(): Buffer {
+	const commands = [
+		'q',
+		'0 0 200 200 re W n',
+		'1 0 0 rg 10 10 m 190 10 l 190 190 l 10 190 l h f',
+		'0 0 1 rg 20 20 m 40 180 160 180 180 20 c h f',
+		...Array.from({ length: 40 }, (_, index) => {
+			const x = 5 + (index % 10) * 18;
+			const y = 5 + Math.floor(index / 10) * 40;
+			return `${x} ${y} 12 28 re f`;
+		}),
+		'Q',
+	].join('\n');
 	const objects = [
 		'<< /Type /Catalog /Pages 2 0 R >>',
 		'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
 		'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>',
-		'<< /Length 32 >>\nstream\nq 1 0 0 rg 10 10 180 180 re f Q\nendstream',
+		`<< /Length ${Buffer.byteLength(commands)} >>\nstream\n${commands}\nendstream`,
 	];
 	let pdf = '%PDF-1.4\n';
 	const offsets = [0];
@@ -22,13 +34,18 @@ function createVectorPdf(): Buffer {
 	return Buffer.from(pdf, 'binary');
 }
 
-test('renders a PDF page with the PDF.js canvas factory', async () => {
-	const pdf = await loadPdf(createVectorPdf());
+test('renders complex PDF paths in an isolated worker without changing parent globals', async () => {
+	const previousPath2D = globalThis.Path2D;
+	class ForeignPath2D {}
+	globalThis.Path2D = ForeignPath2D as unknown as typeof Path2D;
+	const renderer = await IsolatedPdfRenderer.create(createComplexVectorPdf(), 1);
 	try {
-		const png = await renderPageToPng(pdf, 1, 144);
+		const png = await renderer.render(1, 144);
 		assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 		assert.ok(png.length > 100);
+		assert.equal(globalThis.Path2D, ForeignPath2D);
 	} finally {
-		await pdf.destroy();
+		await renderer.terminate();
+		globalThis.Path2D = previousPath2D;
 	}
 });
