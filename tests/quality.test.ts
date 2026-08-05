@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasUsableNativeText } from '../nodes/TesseractNode/quality';
+import { hasUsableNativeText } from '../nodes/shared/quality';
 
 const body = 'Vertrag '.repeat(60);
 
