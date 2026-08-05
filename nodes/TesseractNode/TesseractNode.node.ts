@@ -9,11 +9,11 @@ import {
 } from 'n8n-workflow';
 import { createScheduler, createWorker, OEM, PSM, type Scheduler, type Worker } from 'tesseract.js';
 import { mapLimit } from '../shared/concurrency';
+import { IsolatedPdfRenderer } from '../shared/isolated-renderer';
 import {
 	analyzePages,
 	extractNativePages,
 	loadPdf,
-	renderPageToPng,
 	resolvePageRange,
 	resolveSpecificPages,
 	type PageAnalysis,
@@ -41,7 +41,6 @@ type DocumentResult = {
 
 async function withTimeout<T>(promise: Promise<T>, timeout: number): Promise<T> {
 	if (timeout <= 0) return promise;
-
 	let timer: NodeJS.Timeout | undefined;
 	return Promise.race([
 		promise,
@@ -56,7 +55,6 @@ async function withTimeout<T>(promise: Promise<T>, timeout: number): Promise<T> 
 async function createOcrScheduler(workerCount: number, language: string, dpi: number): Promise<Scheduler> {
 	const scheduler = createScheduler();
 	const workers: Worker[] = [];
-
 	try {
 		await Promise.all(
 			Array.from({ length: workerCount }, async () => {
@@ -78,18 +76,21 @@ async function createOcrScheduler(workerCount: number, language: string, dpi: nu
 }
 
 async function recognizePages(
-	pdf: PdfDocument,
+	buffer: Buffer,
 	pageNumbers: number[],
 	language: string,
 	dpi: number,
 	timeout: number,
 ): Promise<PageResult[]> {
 	if (pageNumbers.length === 0) return [];
-
-	const scheduler = await createOcrScheduler(Math.min(3, pageNumbers.length), language, dpi);
+	const workerCount = Math.min(3, pageNumbers.length);
+	const [scheduler, renderer] = await Promise.all([
+		createOcrScheduler(workerCount, language, dpi),
+		IsolatedPdfRenderer.create(buffer, workerCount),
+	]);
 	try {
 		return await mapLimit(pageNumbers, 3, async (pageNumber) => {
-			const image = await renderPageToPng(pdf, pageNumber, dpi);
+			const image = await renderer.render(pageNumber, dpi);
 			try {
 				const result = await withTimeout(
 					scheduler.addJob('recognize', image, {}, { text: true }),
@@ -102,13 +103,12 @@ async function recognizePages(
 					confidence: result.data.confidence,
 				};
 			} catch (error) {
-				// This lower-level helper adds the page number; execute() wraps it in NodeOperationError.
 				// eslint-disable-next-line n8n-nodes-base/node-execute-block-wrong-error-thrown
 				throw new Error(`Failed to OCR PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		});
 	} finally {
-		await scheduler.terminate();
+		await Promise.all([scheduler.terminate(), renderer.terminate()]);
 	}
 }
 
@@ -139,25 +139,18 @@ async function recognizePdf(
 				? resolveSpecificPages(pdf.numPages, specificPages)
 				: resolvePageRange(pdf.numPages, pageFrom, pageTo);
 		let pages: PageResult[];
-
 		if (mode === 'ocr') {
-			pages = await recognizePages(pdf, selectedPages, language, dpi, timeout);
+			pages = await recognizePages(buffer, selectedPages, language, dpi, timeout);
 		} else if (mode === 'native') {
 			const texts = await extractNativePages(pdf, selectedPages);
 			pages = texts.map((text, index) => ({ page: selectedPages[index], source: 'native', text }));
 		} else {
 			const analyses = await analyzePages(pdf, selectedPages);
 			const native = nativeResults(analyses.filter((page) => page.recommendedMode === 'native'));
-			const ocr = await recognizePages(
-				pdf,
-				analyses.filter((page) => page.recommendedMode === 'ocr').map((page) => page.page),
-				language,
-				dpi,
-				timeout,
-			);
+			const ocrPages = analyses.filter((page) => page.recommendedMode === 'ocr').map((page) => page.page);
+			const ocr = await recognizePages(buffer, ocrPages, language, dpi, timeout);
 			pages = [...native, ...ocr].sort((left, right) => left.page - right.page);
 		}
-
 		return {
 			source: documentSource(pages),
 			pageCount: pdf.numPages,
@@ -185,101 +178,26 @@ export class TesseractNode implements INodeType {
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
 		outputs: [NodeConnectionType.Main],
 		properties: [
-			{
-				displayName: 'Input PDF Field',
-				name: 'inputDataFieldName',
-				type: 'string',
-				default: 'data',
-				description: 'Name of the binary field containing the PDF',
-			},
-			{
-				displayName: 'Recognition Mode',
-				name: 'recognitionMode',
-				type: 'options',
-				default: 'auto',
-				options: [
-					{ name: 'Auto', value: 'auto' },
-					{ name: 'Native Text', value: 'native' },
-					{ name: 'OCR', value: 'ocr' },
-				],
-				description: 'Auto chooses native text or OCR separately for every selected page',
-			},
-			{
-				displayName: 'Page Selection',
-				name: 'pageSelection',
-				type: 'options',
-				default: 'range',
-				options: [
-					{ name: 'Range', value: 'range' },
-					{ name: 'Specific Pages', value: 'specific' },
-				],
-			},
-			{
-				displayName: 'Page From',
-				name: 'pageFrom',
-				type: 'number',
-				default: 1,
-				typeOptions: { minValue: 1, numberStepSize: 1 },
-				displayOptions: { show: { pageSelection: ['range'] } },
-			},
-			{
-				displayName: 'Page To',
-				name: 'pageTo',
-				type: 'number',
-				default: 0,
-				typeOptions: { minValue: 0, numberStepSize: 1 },
-				displayOptions: { show: { pageSelection: ['range'] } },
-				description: 'Use 0 for the last page',
-			},
-			{
-				displayName: 'Pages',
-				name: 'specificPages',
-				type: 'string',
-				default: '',
-				displayOptions: { show: { pageSelection: ['specific'] } },
-				placeholder: '1,5,6',
-				description: 'Comma-separated PDF page numbers, for example 1,5,6',
-			},
-			{
-				displayName: 'Language',
-				name: 'language',
-				type: 'string',
-				default: 'deu',
-				description: 'Tesseract language code, for example deu or eng',
-			},
-			{
-				displayName: 'DPI',
-				name: 'dpi',
-				type: 'number',
-				default: 300,
-				typeOptions: { minValue: 72, maxValue: 600 },
-				description: 'Resolution used when OCR is required',
-			},
-			{
-				displayName: 'OCR Timeout',
-				name: 'timeout',
-				type: 'number',
-				default: 120000,
-				typeOptions: { minValue: 0 },
-				description: 'Maximum OCR time per page in milliseconds; 0 disables the timeout',
-			},
+			{ displayName: 'Input PDF Field', name: 'inputDataFieldName', type: 'string', default: 'data', description: 'Name of the binary field containing the PDF' },
+			{ displayName: 'Recognition Mode', name: 'recognitionMode', type: 'options', default: 'auto', options: [{ name: 'Auto', value: 'auto' }, { name: 'Native Text', value: 'native' }, { name: 'OCR', value: 'ocr' }], description: 'Auto chooses native text or OCR separately for every selected page' },
+			{ displayName: 'Page Selection', name: 'pageSelection', type: 'options', default: 'range', options: [{ name: 'Range', value: 'range' }, { name: 'Specific Pages', value: 'specific' }] },
+			{ displayName: 'Page From', name: 'pageFrom', type: 'number', default: 1, typeOptions: { minValue: 1, numberStepSize: 1 }, displayOptions: { show: { pageSelection: ['range'] } } },
+			{ displayName: 'Page To', name: 'pageTo', type: 'number', default: 0, typeOptions: { minValue: 0, numberStepSize: 1 }, displayOptions: { show: { pageSelection: ['range'] } }, description: 'Use 0 for the last page' },
+			{ displayName: 'Pages', name: 'specificPages', type: 'string', default: '', displayOptions: { show: { pageSelection: ['specific'] } }, placeholder: '1,5,6', description: 'Comma-separated PDF page numbers, for example 1,5,6' },
+			{ displayName: 'Language', name: 'language', type: 'string', default: 'deu', description: 'Tesseract language code, for example deu or eng' },
+			{ displayName: 'DPI', name: 'dpi', type: 'number', default: 300, typeOptions: { minValue: 72, maxValue: 600 }, description: 'Resolution used when OCR is required' },
+			{ displayName: 'OCR Timeout', name: 'timeout', type: 'number', default: 120000, typeOptions: { minValue: 0 }, description: 'Maximum OCR time per page in milliseconds; 0 disables the timeout' },
 		],
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 		const output: INodeExecutionData[] = [];
-
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			const field = this.getNodeParameter('inputDataFieldName', itemIndex, 'data') as string;
 			const binary = items[itemIndex].binary?.[field];
-			if (!binary) {
-				throw new NodeOperationError(this.getNode(), `Binary field "${field}" is missing`, { itemIndex });
-			}
-			if (binary.mimeType !== 'application/pdf') {
-				throw new NodeOperationError(this.getNode(), `Binary field "${field}" must be a PDF`, { itemIndex });
-			}
-
+			if (!binary) throw new NodeOperationError(this.getNode(), `Binary field "${field}" is missing`, { itemIndex });
+			if (binary.mimeType !== 'application/pdf') throw new NodeOperationError(this.getNode(), `Binary field "${field}" must be a PDF`, { itemIndex });
 			try {
 				const result = await recognizePdf(
 					await this.helpers.getBinaryDataBuffer(itemIndex, field),
@@ -297,7 +215,6 @@ export class TesseractNode implements INodeType {
 				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 			}
 		}
-
 		return [output];
 	}
 }
