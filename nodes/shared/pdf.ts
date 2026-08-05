@@ -5,6 +5,22 @@ type Rect = [number, number, number, number];
 type OperatorList = { fnArray: number[]; argsArray: unknown[][] };
 type PdfJsOps = Record<string, number>;
 
+type PdfCanvas = {
+	toBuffer(type: 'image/png'): Buffer;
+	width: number;
+	height: number;
+};
+
+type PdfCanvasAndContext = {
+	canvas: PdfCanvas | null;
+	context: CanvasRenderingContext2D | null;
+};
+
+type PdfCanvasFactory = {
+	create(width: number, height: number): PdfCanvasAndContext;
+	destroy(canvasAndContext: PdfCanvasAndContext): void;
+};
+
 export type PdfPage = {
 	getTextContent(): Promise<{ items: unknown[] }>;
 	getOperatorList(): Promise<OperatorList>;
@@ -19,6 +35,7 @@ export type PdfPage = {
 
 export type PdfDocument = {
 	numPages: number;
+	canvasFactory: PdfCanvasFactory;
 	getPage(pageNumber: number): Promise<PdfPage>;
 	destroy(): Promise<void>;
 };
@@ -41,6 +58,35 @@ async function getPdfjs(): Promise<{ getDocument: (options: unknown) => { promis
 export async function loadPdf(buffer: Buffer): Promise<PdfDocument> {
 	const pdfjs = await getPdfjs();
 	return pdfjs.getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise as Promise<PdfDocument>;
+}
+
+export async function renderPageToPng(pdf: PdfDocument, pageNumber: number, dpi: number): Promise<Buffer> {
+	const page = await pdf.getPage(pageNumber);
+	let canvasAndContext: PdfCanvasAndContext | undefined;
+	try {
+		const viewport = page.getViewport({ scale: dpi / 72 });
+		canvasAndContext = pdf.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+		if (!canvasAndContext.canvas || !canvasAndContext.context) {
+			throw new Error('PDF.js did not create a canvas');
+		}
+		try {
+			await page.render({
+				canvasContext: canvasAndContext.context,
+				viewport,
+				background: '#ffffff',
+			}).promise;
+		} catch (error) {
+			throw new Error(`Failed to render PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		try {
+			return canvasAndContext.canvas.toBuffer('image/png');
+		} catch (error) {
+			throw new Error(`Failed to encode PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	} finally {
+		if (canvasAndContext) pdf.canvasFactory.destroy(canvasAndContext);
+		page.cleanup();
+	}
 }
 
 export async function extractPageText(page: PdfPage): Promise<string> {

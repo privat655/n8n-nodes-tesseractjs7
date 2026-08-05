@@ -1,4 +1,3 @@
-import { createCanvas } from '@napi-rs/canvas';
 import {
 	type IDataObject,
 	type IExecuteFunctions,
@@ -14,6 +13,7 @@ import {
 	analyzePages,
 	extractNativePages,
 	loadPdf,
+	renderPageToPng,
 	resolvePageRange,
 	resolveSpecificPages,
 	type PageAnalysis,
@@ -89,18 +89,10 @@ async function recognizePages(
 	const scheduler = await createOcrScheduler(Math.min(3, pageNumbers.length), language, dpi);
 	try {
 		return await mapLimit(pageNumbers, 3, async (pageNumber) => {
-			const page = await pdf.getPage(pageNumber);
+			const image = await renderPageToPng(pdf, pageNumber, dpi);
 			try {
-				const viewport = page.getViewport({ scale: dpi / 72 });
-				const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-				await page.render({
-					canvasContext: canvas.getContext('2d') as unknown as CanvasRenderingContext2D,
-					viewport,
-					background: '#ffffff',
-				}).promise;
-
 				const result = await withTimeout(
-					scheduler.addJob('recognize', canvas.toBuffer('image/png'), {}, { text: true }),
+					scheduler.addJob('recognize', image, {}, { text: true }),
 					timeout,
 				);
 				return {
@@ -109,8 +101,10 @@ async function recognizePages(
 					text: result.data.text,
 					confidence: result.data.confidence,
 				};
-			} finally {
-				page.cleanup();
+			} catch (error) {
+				// This lower-level helper adds the page number; execute() wraps it in NodeOperationError.
+				// eslint-disable-next-line n8n-nodes-base/node-execute-block-wrong-error-thrown
+				throw new Error(`Failed to OCR PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		});
 	} finally {
