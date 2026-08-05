@@ -1,21 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasUsableNativeText } from '../nodes/shared/quality';
+import { countWords, recommendPageMode } from '../nodes/shared/quality';
 
-const body = 'Vertrag '.repeat(60);
-
-test('accepts documents with short title pages and real body pages', () => {
-	assert.equal(hasUsableNativeText(['Vertrag', body, body, 'Unterschriften']), true);
+test('recognizes a scan page with no native text', () => {
+	assert.equal(recommendPageMode('', 1), 'ocr');
 });
 
-test('rejects documents that contain only headers and page numbers', () => {
-	assert.equal(hasUsableNativeText(['Vertrag 1', 'Vertrag 2', 'Vertrag 3', 'Vertrag 4']), false);
+test('recognizes a scan page with only a small footer', () => {
+	assert.equal(recommendPageMode('Seite 4 von 4', 1), 'ocr');
 });
 
-test('accepts numeric tables as meaningful native text', () => {
-	assert.equal(hasUsableNativeText(['2026 1000 2000 3000 '.repeat(25)]), true);
+test('keeps a text page with a full-page background image native', () => {
+	assert.equal(recommendPageMode('Vertrag '.repeat(25), 1), 'native');
 });
 
-test('rejects broken unicode text layers', () => {
-	assert.equal(hasUsableNativeText([`${body}${'�'.repeat(100)}`]), false);
+test('does not OCR a small logo or an empty page', () => {
+	assert.equal(recommendPageMode('', 0.02), 'native');
+	assert.equal(recommendPageMode('', 0), 'native');
+});
+
+test('rejects a broken native text layer', () => {
+	assert.equal(recommendPageMode(`Vertragstext ${'�'.repeat(30)}`, 0), 'ocr');
+});
+
+test('counts German words, numbers and joined identifiers', () => {
+	assert.equal(countWords('Zahlungsanforderung 26 BA22-01151 9.478.505,84'), 5);
 });
