@@ -4,6 +4,7 @@ import {
 	type INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	NodeConnectionType,
 	NodeOperationError,
 } from 'n8n-workflow';
 import { analyzePages, loadPdf } from '../shared/pdf';
@@ -17,8 +18,10 @@ export class PdfRecognitionPreflight implements INodeType {
 		version: 1.2,
 		description: 'Inspect every PDF page and recommend native text extraction or OCR',
 		defaults: { name: 'PDF Recognition Preflight' },
-		inputs: ['main'],
-		outputs: ['main'],
+		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
+		inputs: [NodeConnectionType.Main],
+		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
+		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
 				displayName: 'Input PDF Field',
