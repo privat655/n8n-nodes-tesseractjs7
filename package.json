@@ -1,48 +1,63 @@
 {
-	"name": "n8n-nodes-tesseractjs7",
-	"version": "2.3.2",
-	"description": "An n8n community node that extracts text from PDFs using their text layer or Tesseract OCR",
-	"keywords": ["n8n-community-node-package"],
-	"license": "MIT",
-	"homepage": "https://github.com/privat655/n8n-nodes-tesseractjs7",
-	"author": { "name": "privat655" },
-	"repository": { "type": "git", "url": "https://github.com/privat655/n8n-nodes-tesseractjs7.git" },
-	"engines": { "node": ">=20.16" },
-	"main": "index.js",
-	"scripts": {
-		"build": "tsc && gulp build:icons",
-		"dev": "tsc --watch",
-		"format": "prettier nodes tests --write",
-		"lint": "eslint --ext .ts nodes tests package.json",
-		"lintfix": "eslint --ext .ts nodes tests package.json --fix",
-		"test": "npm run build && node --test dist/tests/*.test.js",
-		"prepublishOnly": "npm run test && npm run lint -c .eslintrc.prepublish.js nodes package.json",
-		"release": "npm publish"
-	},
-	"files": ["dist"],
-	"n8n": {
-		"n8nNodesApiVersion": 1,
-		"credentials": [],
-		"nodes": [
-			"dist/nodes/TesseractNode/TesseractNode.node.js",
-			"dist/nodes/PdfRecognitionPreflight/PdfRecognitionPreflight.node.js"
-		]
-	},
-	"devDependencies": {
-		"@types/node": "^22.15.2",
-		"@typescript-eslint/parser": "^7.18.0",
-		"eslint": "^8.57.1",
-		"eslint-plugin-n8n-nodes-base": "^1.16.3",
-		"gulp": "^5.0.1",
-		"n8n-workflow": "1.82.0",
-		"prettier": "^3.3.2",
-		"typescript": "~5.9.0"
-	},
-	"peerDependencies": { "n8n-workflow": ">=1.82.0 <3" },
-	"dependencies": {
-		"@napi-rs/canvas": "0.1.79",
-		"pdfjs-dist": "5.3.31",
-		"tesseract.js": "^7.0.0"
-	},
-	"overrides": { "form-data": "4.0.6" }
+  "name": "n8n-nodes-tesseractjs7",
+  "version": "2.4.0",
+  "description": "An n8n community node that extracts text from PDFs using their text layer or Tesseract OCR",
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/privat655/n8n-nodes-tesseractjs7",
+  "author": {
+    "name": "privat655"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/privat655/n8n-nodes-tesseractjs7.git"
+  },
+  "engines": {
+    "node": ">=20.16"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && gulp build:icons",
+    "dev": "tsc --watch",
+    "format": "prettier nodes tests --write",
+    "lint": "eslint --ext .ts nodes tests package.json",
+    "lintfix": "eslint --ext .ts nodes tests package.json --fix",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "prepublishOnly": "npm run test && npm run lint -c .eslintrc.prepublish.js nodes package.json",
+    "release": "npm publish"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [],
+    "nodes": [
+      "dist/nodes/TesseractNode/TesseractNode.node.js",
+      "dist/nodes/PdfRecognitionPreflight/PdfRecognitionPreflight.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.2",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-n8n-nodes-base": "^1.16.3",
+    "gulp": "^5.0.1",
+    "n8n-workflow": "1.82.0",
+    "prettier": "^3.3.2",
+    "typescript": "~5.9.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": ">=1.82.0 <3"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "0.1.79",
+    "pdfjs-dist": "5.3.31",
+    "tesseract.js": "^7.0.0"
+  },
+  "overrides": {
+    "form-data": "4.0.6"
+  }
 }
