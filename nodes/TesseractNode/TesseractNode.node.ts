@@ -24,13 +24,7 @@ type RecognitionMode = 'auto' | 'native' | 'ocr';
 type PageSelection = 'range' | 'specific';
 type PageSource = 'native' | 'ocr';
 
-type PageResult = {
-	page: number;
-	source: PageSource;
-	text: string;
-	confidence?: number;
-};
-
+type PageResult = { page: number; source: PageSource; text: string; confidence?: number };
 type DocumentResult = {
 	source: PageSource | 'mixed';
 	pageCount: number;
@@ -56,18 +50,16 @@ async function createOcrScheduler(workerCount: number, language: string, dpi: nu
 	const scheduler = createScheduler();
 	const workers: Worker[] = [];
 	try {
-		await Promise.all(
-			Array.from({ length: workerCount }, async () => {
-				const worker = await createWorker(language, OEM.LSTM_ONLY);
-				workers.push(worker);
-				await worker.setParameters({
-					tessedit_pageseg_mode: PSM.AUTO,
-					preserve_interword_spaces: '1',
-					user_defined_dpi: String(dpi),
-				});
-				scheduler.addWorker(worker);
-			}),
-		);
+		await Promise.all(Array.from({ length: workerCount }, async () => {
+			const worker = await createWorker(language, OEM.LSTM_ONLY);
+			workers.push(worker);
+			await worker.setParameters({
+				tessedit_pageseg_mode: PSM.AUTO,
+				preserve_interword_spaces: '1',
+				user_defined_dpi: String(dpi),
+			});
+			scheduler.addWorker(worker);
+		}));
 		return scheduler;
 	} catch (error) {
 		await Promise.all(workers.map(async (worker) => worker.terminate()));
@@ -96,14 +88,8 @@ async function recognizePages(
 					scheduler.addJob('recognize', image, {}, { text: true }),
 					timeout,
 				);
-				return {
-					page: pageNumber,
-					source: 'ocr',
-					text: result.data.text,
-					confidence: result.data.confidence,
-				};
+				return { page: pageNumber, source: 'ocr', text: result.data.text, confidence: result.data.confidence };
 			} catch (error) {
-				// eslint-disable-next-line n8n-nodes-base/node-execute-block-wrong-error-thrown
 				throw new Error(`Failed to OCR PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		});
@@ -134,10 +120,9 @@ async function recognizePdf(
 ): Promise<DocumentResult> {
 	const pdf: PdfDocument = await loadPdf(buffer);
 	try {
-		const selectedPages =
-			pageSelection === 'specific'
-				? resolveSpecificPages(pdf.numPages, specificPages)
-				: resolvePageRange(pdf.numPages, pageFrom, pageTo);
+		const selectedPages = pageSelection === 'specific'
+			? resolveSpecificPages(pdf.numPages, specificPages)
+			: resolvePageRange(pdf.numPages, pageFrom, pageTo);
 		let pages: PageResult[];
 		if (mode === 'ocr') {
 			pages = await recognizePages(buffer, selectedPages, language, dpi, timeout);
@@ -170,12 +155,10 @@ export class TesseractNode implements INodeType {
 		name: 'tesseractNode',
 		icon: 'file:tesseract.svg',
 		group: ['transform'],
-		version: 2.3,
+		version: 2.4,
 		description: 'Extract text from selected PDF pages using their text layer or OCR',
 		defaults: { name: 'PDF Text Recognition' },
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [NodeConnectionType.Main],
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{ displayName: 'Input PDF Field', name: 'inputDataFieldName', type: 'string', default: 'data', description: 'Name of the binary field containing the PDF' },
@@ -197,7 +180,6 @@ export class TesseractNode implements INodeType {
 			const field = this.getNodeParameter('inputDataFieldName', itemIndex, 'data') as string;
 			const binary = items[itemIndex].binary?.[field];
 			if (!binary) throw new NodeOperationError(this.getNode(), `Binary field "${field}" is missing`, { itemIndex });
-			if (binary.mimeType !== 'application/pdf') throw new NodeOperationError(this.getNode(), `Binary field "${field}" must be a PDF`, { itemIndex });
 			try {
 				const result = await recognizePdf(
 					await this.helpers.getBinaryDataBuffer(itemIndex, field),
@@ -210,7 +192,21 @@ export class TesseractNode implements INodeType {
 					this.getNodeParameter('dpi', itemIndex, 300) as number,
 					this.getNodeParameter('timeout', itemIndex, 120000) as number,
 				);
-				output.push({ json: result as unknown as IDataObject, pairedItem: { item: itemIndex } });
+
+				const context = { ...(items[itemIndex].json as IDataObject) };
+				delete context.pages;
+				delete context.pageCount;
+				delete context.recommendedMode;
+				delete context.nativePageCount;
+				delete context.ocrPageCount;
+				delete context.downloaded_base64;
+				delete context.attachment_base64;
+				delete context.attachments_to_process;
+
+				output.push({
+					json: { ...context, recognition_result: result } as IDataObject,
+					pairedItem: { item: itemIndex },
+				});
 			} catch (error) {
 				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 			}
