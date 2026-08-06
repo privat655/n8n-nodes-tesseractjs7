@@ -66,7 +66,6 @@ export class PdfRecognitionPreflight implements INodeType {
 							imageCoverage: Number(page.imageCoverage.toFixed(4)),
 						})),
 					} as IDataObject,
-					binary: items[itemIndex].binary,
 					pairedItem: { item: itemIndex },
 				});
 			} finally {
