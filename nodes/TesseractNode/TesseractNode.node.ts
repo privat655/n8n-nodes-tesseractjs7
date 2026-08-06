@@ -1,10 +1,10 @@
 import {
 	type IDataObject,
 	type IExecuteFunctions,
+	type INode,
 	type INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
-	NodeConnectionType,
 	NodeOperationError,
 } from 'n8n-workflow';
 import { createScheduler, createWorker, OEM, PSM, type Scheduler, type Worker } from 'tesseract.js';
@@ -68,6 +68,7 @@ async function createOcrScheduler(workerCount: number, language: string, dpi: nu
 }
 
 async function recognizePages(
+	node: INode,
 	buffer: Buffer,
 	pageNumbers: number[],
 	language: string,
@@ -90,7 +91,10 @@ async function recognizePages(
 				);
 				return { page: pageNumber, source: 'ocr', text: result.data.text, confidence: result.data.confidence };
 			} catch (error) {
-				throw new Error(`Failed to OCR PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
+				throw new NodeOperationError(
+					node,
+					`Failed to OCR PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`,
+				);
 			}
 		});
 	} finally {
@@ -108,6 +112,7 @@ function nativeResults(analyses: PageAnalysis[]): PageResult[] {
 }
 
 async function recognizePdf(
+	node: INode,
 	buffer: Buffer,
 	mode: RecognitionMode,
 	pageSelection: PageSelection,
@@ -125,7 +130,7 @@ async function recognizePdf(
 			: resolvePageRange(pdf.numPages, pageFrom, pageTo);
 		let pages: PageResult[];
 		if (mode === 'ocr') {
-			pages = await recognizePages(buffer, selectedPages, language, dpi, timeout);
+			pages = await recognizePages(node, buffer, selectedPages, language, dpi, timeout);
 		} else if (mode === 'native') {
 			const texts = await extractNativePages(pdf, selectedPages);
 			pages = texts.map((text, index) => ({ page: selectedPages[index], source: 'native', text }));
@@ -133,7 +138,7 @@ async function recognizePdf(
 			const analyses = await analyzePages(pdf, selectedPages);
 			const native = nativeResults(analyses.filter((page) => page.recommendedMode === 'native'));
 			const ocrPages = analyses.filter((page) => page.recommendedMode === 'ocr').map((page) => page.page);
-			const ocr = await recognizePages(buffer, ocrPages, language, dpi, timeout);
+			const ocr = await recognizePages(node, buffer, ocrPages, language, dpi, timeout);
 			pages = [...native, ...ocr].sort((left, right) => left.page - right.page);
 		}
 		return {
@@ -158,8 +163,8 @@ export class TesseractNode implements INodeType {
 		version: 2.4,
 		description: 'Extract text from selected PDF pages using their text layer or OCR',
 		defaults: { name: 'PDF Text Recognition' },
-		inputs: [NodeConnectionType.Main],
-		outputs: [NodeConnectionType.Main],
+		inputs: ['main'],
+		outputs: ['main'],
 		properties: [
 			{ displayName: 'Input PDF Field', name: 'inputDataFieldName', type: 'string', default: 'data', description: 'Name of the binary field containing the PDF' },
 			{ displayName: 'Recognition Mode', name: 'recognitionMode', type: 'options', default: 'auto', options: [{ name: 'Auto', value: 'auto' }, { name: 'Native Text', value: 'native' }, { name: 'OCR', value: 'ocr' }], description: 'Auto chooses native text or OCR separately for every selected page' },
@@ -182,6 +187,7 @@ export class TesseractNode implements INodeType {
 			if (!binary) throw new NodeOperationError(this.getNode(), `Binary field "${field}" is missing`, { itemIndex });
 			try {
 				const result = await recognizePdf(
+					this.getNode(),
 					await this.helpers.getBinaryDataBuffer(itemIndex, field),
 					this.getNodeParameter('recognitionMode', itemIndex, 'auto') as RecognitionMode,
 					this.getNodeParameter('pageSelection', itemIndex, 'range') as PageSelection,
@@ -208,6 +214,7 @@ export class TesseractNode implements INodeType {
 					pairedItem: { item: itemIndex },
 				});
 			} catch (error) {
+				if (error instanceof NodeOperationError) throw error;
 				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 			}
 		}
