@@ -15,12 +15,10 @@ export class PdfRecognitionPreflight implements INodeType {
 		name: 'pdfRecognitionPreflight',
 		icon: 'file:tesseract.svg',
 		group: ['transform'],
-		version: 1.1,
+		version: 1.2,
 		description: 'Inspect every PDF page and recommend native text extraction or OCR',
 		defaults: { name: 'PDF Recognition Preflight' },
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [NodeConnectionType.Main],
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
@@ -43,19 +41,22 @@ export class PdfRecognitionPreflight implements INodeType {
 			if (!binary) {
 				throw new NodeOperationError(this.getNode(), `Binary field "${field}" is missing`, { itemIndex });
 			}
-			if (binary.mimeType !== 'application/pdf') {
-				throw new NodeOperationError(this.getNode(), `Binary field "${field}" must be a PDF`, { itemIndex });
-			}
 
 			const pdf = await loadPdf(await this.helpers.getBinaryDataBuffer(itemIndex, field));
 			try {
 				const pageNumbers = Array.from({ length: pdf.numPages }, (_, index) => index + 1);
 				const analyses = await analyzePages(pdf, pageNumbers);
 				const modes = new Set(analyses.map((page) => page.recommendedMode));
+				const nativePageCount = analyses.filter((page) => page.recommendedMode === 'native').length;
+				const ocrPageCount = analyses.length - nativePageCount;
+
 				output.push({
 					json: {
+						...(items[itemIndex].json as IDataObject),
 						pageCount: pdf.numPages,
 						recommendedMode: modes.size === 1 ? analyses[0].recommendedMode : 'auto',
+						nativePageCount,
+						ocrPageCount,
 						pages: analyses.map((page) => ({
 							page: page.page,
 							recommendedMode: page.recommendedMode,
