@@ -9,7 +9,6 @@ import {
 	NodeOperationError,
 } from 'n8n-workflow';
 import { createScheduler, createWorker, OEM, PSM, type Scheduler, type Worker } from 'tesseract.js';
-import { mapLimit } from '../shared/concurrency';
 import { IsolatedPdfRenderer } from '../shared/isolated-renderer';
 import {
 	analyzePages,
@@ -47,23 +46,20 @@ async function withTimeout<T>(promise: Promise<T>, timeout: number): Promise<T> 
 	});
 }
 
-async function createOcrScheduler(workerCount: number, language: string, dpi: number): Promise<Scheduler> {
+async function createOcrScheduler(language: string, dpi: number): Promise<Scheduler> {
 	const scheduler = createScheduler();
-	const workers: Worker[] = [];
+	let worker: Worker | undefined;
 	try {
-		await Promise.all(Array.from({ length: workerCount }, async () => {
-			const worker = await createWorker(language, OEM.LSTM_ONLY);
-			workers.push(worker);
-			await worker.setParameters({
-				tessedit_pageseg_mode: PSM.AUTO,
-				preserve_interword_spaces: '1',
-				user_defined_dpi: String(dpi),
-			});
-			scheduler.addWorker(worker);
-		}));
+		worker = await createWorker(language, OEM.LSTM_ONLY);
+		await worker.setParameters({
+			tessedit_pageseg_mode: PSM.AUTO,
+			preserve_interword_spaces: '1',
+			user_defined_dpi: String(dpi),
+		});
+		scheduler.addWorker(worker);
 		return scheduler;
 	} catch (error) {
-		await Promise.all(workers.map(async (worker) => worker.terminate()));
+		if (worker) await worker.terminate();
 		throw error;
 	}
 }
@@ -77,27 +73,31 @@ async function recognizePages(
 	timeout: number,
 ): Promise<PageResult[]> {
 	if (pageNumbers.length === 0) return [];
-	const workerCount = Math.min(3, pageNumbers.length);
-	const [scheduler, renderer] = await Promise.all([
-		createOcrScheduler(workerCount, language, dpi),
-		IsolatedPdfRenderer.create(buffer, workerCount),
-	]);
+	const scheduler = await createOcrScheduler(language, dpi);
+	const renderer = await IsolatedPdfRenderer.create(buffer, 1);
+	const results: PageResult[] = [];
 	try {
-		return await mapLimit(pageNumbers, 3, async (pageNumber) => {
+		for (const pageNumber of pageNumbers) {
 			const image = await renderer.render(pageNumber, dpi);
 			try {
 				const result = await withTimeout(
 					scheduler.addJob('recognize', image, {}, { text: true }),
 					timeout,
 				);
-				return { page: pageNumber, source: 'ocr', text: result.data.text, confidence: result.data.confidence };
+				results.push({
+					page: pageNumber,
+					source: 'ocr',
+					text: result.data.text,
+					confidence: result.data.confidence,
+				});
 			} catch (error) {
 				throw new NodeOperationError(
 					node,
 					`Failed to OCR PDF page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
-		});
+		}
+		return results;
 	} finally {
 		await Promise.all([scheduler.terminate(), renderer.terminate()]);
 	}
