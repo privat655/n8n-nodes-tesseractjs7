@@ -1,6 +1,6 @@
 # n8n-nodes-tesseractjs7
 
-Two n8n community nodes for extracting text from PDF documents.
+Three n8n community nodes for PDF inspection, extraction/OCR, and lightweight page slicing.
 
 ## PDF Recognition Preflight
 
@@ -58,6 +58,38 @@ Specific-page output:
 }
 ```
 
+## PDF Page Slice
+
+The slice node creates one standalone PDF containing exactly one inclusive page range from the input PDF. It is intentionally small and deterministic so it can be placed behind an n8n `Loop Over Items` node with batch size `1` for memory-safe sequential processing of large PDFs.
+
+It does not render pages, run OCR, create arrays of PDF parts, or keep the original PDF as an additional output binary. The configured output binary field contains only the sliced PDF.
+
+Example for a Mistral-style sequential worker:
+
+```text
+large PDF
+  -> plan page ranges
+  -> Loop Over Items (batch size 1)
+  -> PDF Page Slice
+  -> OCR/API call
+  -> discard part binary
+  -> next range
+```
+
+The node adds only small JSON metadata:
+
+```json
+{
+  "pdf_slice_page_from": 1,
+  "pdf_slice_page_to": 10,
+  "pdf_slice_page_count": 10,
+  "pdf_source_page_count": 87,
+  "pdf_slice_size_bytes": 1234567
+}
+```
+
+`Max Output Bytes` can be used as a hard safety check for API upload limits. The node fails rather than forwarding an oversized part.
+
 ## Parameters
 
 ### Preflight
@@ -76,6 +108,14 @@ Specific-page output:
 - **DPI**: OCR render resolution, default `300`
 - **OCR Timeout**: maximum OCR time per page, default `120000` ms
 
+### Page Slice
+
+- **Input PDF Field**: binary property containing the source PDF, default `data`
+- **Output PDF Field**: binary property that will contain the sliced PDF, default `data`
+- **Page From**: first page to include, 1-based and inclusive
+- **Page To**: last page to include, 1-based and inclusive
+- **Max Output Bytes**: optional hard size limit; `0` disables the check
+
 ## Behavior
 
 - PDF input only
@@ -83,7 +123,8 @@ Specific-page output:
 - Page results remain ordered
 - German (`deu`) is the default OCR language
 - OCR uses Tesseract LSTM, automatic page segmentation and preserved inter-word spaces
-- No file-size limit, image input, binary OCR output or automatic DPI fallback
+- Page Slice copies selected PDF pages without rendering and returns only the sliced binary
+- No automatic fan-out of PDF parts; sequential batching remains under workflow control
 
 ## Development
 
