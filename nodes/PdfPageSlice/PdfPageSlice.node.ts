@@ -86,8 +86,10 @@ export class PdfPageSlice implements INodeType {
 				const outputBuffer = Buffer.from(result.bytes);
 
 				if (maxOutputBytes > 0 && outputBuffer.length > maxOutputBytes) {
-					throw new Error(
+					throw new NodeOperationError(
+						this.getNode(),
 						`Generated PDF slice is ${outputBuffer.length} bytes and exceeds Max Output Bytes (${maxOutputBytes})`,
+						{ itemIndex },
 					);
 				}
 
@@ -109,6 +111,7 @@ export class PdfPageSlice implements INodeType {
 					pairedItem: { item: itemIndex },
 				});
 			} catch (error) {
+				if (error instanceof NodeOperationError) throw error;
 				throw new NodeOperationError(
 					this.getNode(),
 					`Failed to slice PDF pages ${pageFrom}-${pageTo}: ${error instanceof Error ? error.message : String(error)}`,
