@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-tesseractjs7",
-  "version": "2.4.2",
-  "description": "An n8n community node that extracts text from PDFs using their text layer or Tesseract OCR",
+  "version": "2.5.0",
+  "description": "An n8n community node package for PDF text extraction, OCR preflight, recognition, and lightweight page slicing",
   "keywords": [
     "n8n-community-node-package"
   ],
@@ -36,7 +36,8 @@
     "credentials": [],
     "nodes": [
       "dist/nodes/TesseractNode/TesseractNode.node.js",
-      "dist/nodes/PdfRecognitionPreflight/PdfRecognitionPreflight.node.js"
+      "dist/nodes/PdfRecognitionPreflight/PdfRecognitionPreflight.node.js",
+      "dist/nodes/PdfPageSlice/PdfPageSlice.node.js"
     ]
   },
   "devDependencies": {
@@ -54,6 +55,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "0.1.79",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "5.3.31",
     "tesseract.js": "^7.0.0"
   },
