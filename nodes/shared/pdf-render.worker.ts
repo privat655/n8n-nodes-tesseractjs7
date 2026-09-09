@@ -1,36 +1,19 @@
 import { parentPort, workerData } from 'node:worker_threads';
 
-type RenderRequest = {
-	id: number;
-	type: 'render';
-	page: number;
-	dpi: number;
-};
-
-type ShutdownRequest = { type: 'shutdown' };
-
-type WorkerInput = RenderRequest | ShutdownRequest;
-
+type PageRequest = { id: number; type: 'render' | 'inspect'; page: number; dpi: number };
+type WorkerInput = PageRequest | { type: 'shutdown' };
 type PdfCanvas = {
-	width: number;
-	height: number;
+	width: number; height: number;
 	getContext(type: '2d', options?: { willReadFrequently?: boolean }): CanvasRenderingContext2D;
 	toBuffer(type: 'image/png'): Buffer;
 };
+type CanvasEntry = { canvas: PdfCanvas | null; context: CanvasRenderingContext2D | null };
 
-type CanvasEntry = {
-	canvas: PdfCanvas | null;
-	context: CanvasRenderingContext2D | null;
-};
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 async function start(): Promise<void> {
 	const port = parentPort;
 	if (!port) throw new Error('PDF renderer worker requires a parent port');
-
 	const canvas = await import('@napi-rs/canvas');
 	globalThis.DOMMatrix = canvas.DOMMatrix as unknown as typeof DOMMatrix;
 	globalThis.ImageData = canvas.ImageData as unknown as typeof ImageData;
@@ -45,18 +28,13 @@ async function start(): Promise<void> {
 	class WorkerCanvasFactory {
 		create(width: number, height: number): CanvasEntry {
 			const created = canvas.createCanvas(width, height) as unknown as PdfCanvas;
-			return {
-				canvas: created,
-				context: created.getContext('2d', { willReadFrequently: true }),
-			};
+			return { canvas: created, context: created.getContext('2d', { willReadFrequently: true }) };
 		}
-
 		reset(entry: CanvasEntry, width: number, height: number): void {
 			if (!entry.canvas) throw new Error('Canvas is not specified');
 			entry.canvas.width = width;
 			entry.canvas.height = height;
 		}
-
 		destroy(entry: CanvasEntry): void {
 			if (!entry.canvas) return;
 			entry.canvas.width = 0;
@@ -71,55 +49,37 @@ async function start(): Promise<void> {
 	};
 	const sharedPdf = (workerData as { pdfData: SharedArrayBuffer }).pdfData;
 	const localPdf = Uint8Array.from(new Uint8Array(sharedPdf));
-	const pdf = await pdfjs.getDocument({
-		data: localPdf,
-		useSystemFonts: true,
-		CanvasFactory: WorkerCanvasFactory,
-	}).promise;
-
-	port.postMessage({ type: 'ready' });
+	const pdf = await pdfjs.getDocument({ data: localPdf, useSystemFonts: true, CanvasFactory: WorkerCanvasFactory }).promise;
+	port.postMessage({ type: 'ready', pageCount: pdf.numPages });
 	port.on('message', async (message: WorkerInput) => {
 		if (message.type === 'shutdown') {
 			await pdf.destroy();
 			port.close();
 			return;
 		}
-
-		const page = await pdf.getPage(message.page);
+		let page: any;
 		let entry: CanvasEntry | undefined;
 		try {
+			page = await pdf.getPage(message.page);
 			const viewport = page.getViewport({ scale: message.dpi / 72 });
-			const createdEntry = pdf.canvasFactory.create(
-				Math.ceil(viewport.width),
-				Math.ceil(viewport.height),
-			) as CanvasEntry;
-			entry = createdEntry;
-			const { canvas: renderedCanvas, context } = createdEntry;
+			const width = Math.ceil(viewport.width);
+			const height = Math.ceil(viewport.height);
+			if (message.type === 'inspect') {
+				port.postMessage({ type: 'dimensions', id: message.id, page: message.page, width, height });
+				return;
+			}
+			entry = pdf.canvasFactory.create(width, height) as CanvasEntry;
+			const { canvas: renderedCanvas, context } = entry;
 			if (!renderedCanvas || !context) throw new Error('PDF.js did not create a canvas');
-			await page.render({
-				canvasContext: context,
-				viewport,
-				background: '#ffffff',
-			}).promise;
+			await page.render({ canvasContext: context, viewport, background: '#ffffff' }).promise;
 			const png = Uint8Array.from(renderedCanvas.toBuffer('image/png'));
-			port.postMessage(
-				{ type: 'result', id: message.id, page: message.page, png },
-				[png.buffer],
-			);
+			port.postMessage({ type: 'result', id: message.id, page: message.page, png }, [png.buffer]);
 		} catch (error) {
-			port.postMessage({
-				type: 'error',
-				id: message.id,
-				page: message.page,
-				message: errorMessage(error),
-			});
+			port.postMessage({ type: 'error', id: message.id, page: message.page, message: errorMessage(error) });
 		} finally {
 			if (entry) pdf.canvasFactory.destroy(entry);
-			page.cleanup();
+			page?.cleanup();
 		}
 	});
 }
-
-void start().catch((error) => {
-	throw error;
-});
+void start().catch((error) => { throw error; });
