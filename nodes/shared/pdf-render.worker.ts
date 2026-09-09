@@ -32,8 +32,13 @@ async function start(): Promise<void> {
 		}
 		reset(entry: CanvasEntry, width: number, height: number): void {
 			if (!entry.canvas) throw new Error('Canvas is not specified');
-			entry.canvas.width = width;
-			entry.canvas.height = height;
+			// Avoid mutating native canvas width/height. @napi-rs/canvas 0.1.79 has a known
+			// external-memory accounting bug in those resize setters that can fatally abort V8.
+			// PDF.js can invoke reset for temporary image/mask canvases, so replace the backing
+			// canvas and context atomically instead of resizing the existing native surface.
+			const replacement = this.create(width, height);
+			entry.context = replacement.context;
+			entry.canvas = replacement.canvas;
 		}
 		destroy(entry: CanvasEntry): void {
 			// Release references without resizing a native surface to zero twice.
