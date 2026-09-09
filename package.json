@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-tesseractjs7",
-  "version": "2.6.1",
+  "version": "2.6.3",
   "description": "An n8n community node package for memory-efficient sequential PDF text extraction, OCR preflight, recognition, and lightweight page slicing",
   "keywords": [
     "n8n-community-node-package"
