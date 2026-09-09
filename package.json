@@ -37,7 +37,8 @@
     "nodes": [
       "dist/nodes/TesseractNode/TesseractNode.node.js",
       "dist/nodes/PdfRecognitionPreflight/PdfRecognitionPreflight.node.js",
-      "dist/nodes/PdfPageSlice/PdfPageSlice.node.js"
+      "dist/nodes/PdfPageSlice/PdfPageSlice.node.js",
+      "dist/nodes/PdfPagesToPng/PdfPagesToPng.node.js"
     ]
   },
   "devDependencies": {

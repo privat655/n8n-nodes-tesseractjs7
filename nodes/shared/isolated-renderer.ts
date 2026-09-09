@@ -1,59 +1,57 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-type RenderRequest = {
-	id: number;
-	type: 'render';
-	page: number;
-	dpi: number;
-};
-
+export type PageDimensions = { width: number; height: number };
+type JobBase = { id: number; page: number; dpi: number; reject: (error: Error) => void };
+type Job = JobBase & (
+	| { type: 'render'; resolve: (value: Buffer) => void }
+	| { type: 'inspect'; resolve: (value: PageDimensions) => void }
+);
 type WorkerResponse =
-	| { type: 'ready' }
+	| { type: 'ready'; pageCount: number }
 	| { type: 'result'; id: number; page: number; png: Uint8Array }
+	| { type: 'dimensions'; id: number; page: number; width: number; height: number }
 	| { type: 'error'; id: number; page: number; message: string };
-
-type RenderJob = {
-	id: number;
-	page: number;
-	dpi: number;
-	resolve: (value: Buffer) => void;
-	reject: (error: Error) => void;
-};
-
-type WorkerState = {
-	worker: Worker;
-	ready: boolean;
-	current?: RenderJob;
-};
+type WorkerState = { worker: Worker; ready: boolean; current?: Job };
 
 export class IsolatedPdfRenderer {
 	private readonly states: WorkerState[] = [];
-	private readonly queue: RenderJob[] = [];
+	private readonly queue: Job[] = [];
 	private nextId = 1;
 	private closed = false;
-
+	private sourcePageCount = 0;
 	private constructor() {}
+
+	get pageCount(): number { return this.sourcePageCount; }
 
 	static async create(pdf: Buffer, workerCount: number): Promise<IsolatedPdfRenderer> {
 		if (!Number.isInteger(workerCount) || workerCount < 1) {
 			throw new Error('PDF renderer worker count must be a positive integer');
 		}
-
 		const sharedPdf = new SharedArrayBuffer(pdf.length);
 		new Uint8Array(sharedPdf).set(pdf);
 		const renderer = new IsolatedPdfRenderer();
-		await Promise.all(
-			Array.from({ length: workerCount }, async () => renderer.addWorker(sharedPdf)),
-		);
-		return renderer;
+		try {
+			await Promise.all(Array.from({ length: workerCount }, async () => renderer.addWorker(sharedPdf)));
+			return renderer;
+		} catch (error) {
+			await renderer.terminate();
+			throw error;
+		}
 	}
 
 	render(page: number, dpi: number): Promise<Buffer> {
 		if (this.closed) return Promise.reject(new Error('PDF renderer is closed'));
-
 		return new Promise<Buffer>((resolve, reject) => {
-			this.queue.push({ id: this.nextId++, page, dpi, resolve, reject });
+			this.queue.push({ type: 'render', id: this.nextId++, page, dpi, resolve, reject });
+			this.dispatch();
+		});
+	}
+
+	inspect(page: number, dpi: number): Promise<PageDimensions> {
+		if (this.closed) return Promise.reject(new Error('PDF renderer is closed'));
+		return new Promise<PageDimensions>((resolve, reject) => {
+			this.queue.push({ type: 'inspect', id: this.nextId++, page, dpi, resolve, reject });
 			this.dispatch();
 		});
 	}
@@ -63,15 +61,25 @@ export class IsolatedPdfRenderer {
 		this.closed = true;
 		const error = new Error('PDF renderer terminated');
 		for (const job of this.queue.splice(0)) job.reject(error);
-		for (const state of this.states) state.current?.reject(error);
-		await Promise.all(this.states.map(async ({ worker }) => worker.terminate()));
+		await Promise.all(this.states.map(async (state) => {
+			if (state.current || !state.ready) {
+				state.current?.reject(error);
+				await state.worker.terminate();
+				return;
+			}
+			// Let PDF.js dispose its document before an idle native canvas isolate exits.
+			await new Promise<void>((resolve) => {
+				const timer = setTimeout(() => { void state.worker.terminate().then(() => resolve()); }, 1000);
+				state.worker.once('exit', () => { clearTimeout(timer); resolve(); });
+				state.worker.postMessage({ type: 'shutdown' });
+			});
+		}));
 	}
 
 	private async addWorker(pdfData: SharedArrayBuffer): Promise<void> {
 		const worker = new Worker(join(__dirname, 'pdf-render.worker.js'), { workerData: { pdfData } });
 		const state: WorkerState = { worker, ready: false };
 		this.states.push(state);
-
 		await new Promise<void>((resolve, reject) => {
 			let settled = false;
 			const failStartup = (error: Error) => {
@@ -79,11 +87,11 @@ export class IsolatedPdfRenderer {
 				settled = true;
 				reject(error);
 			};
-
 			worker.on('message', (message: WorkerResponse) => {
 				if (message.type === 'ready') {
 					if (!settled) {
 						settled = true;
+						this.sourcePageCount = message.pageCount;
 						state.ready = true;
 						resolve();
 						this.dispatch();
@@ -92,13 +100,10 @@ export class IsolatedPdfRenderer {
 				}
 				this.handleResponse(state, message);
 			});
-			worker.on('error', (error) => {
-				failStartup(error);
-				this.failAll(error);
-			});
+			worker.on('error', (error) => { failStartup(error); this.failAll(error); });
 			worker.on('exit', (code) => {
-				if (!this.closed && code !== 0) {
-					const error = new Error(`PDF renderer worker exited with code ${code}`);
+				if (!this.closed) {
+					const error = new Error(`PDF renderer worker exited unexpectedly with code ${code}`);
 					failStartup(error);
 					this.failAll(error);
 				}
@@ -113,12 +118,10 @@ export class IsolatedPdfRenderer {
 			this.failAll(new Error(`PDF renderer returned an unexpected response for page ${message.page}`));
 			return;
 		}
-
-		if (message.type === 'result') {
-			job.resolve(Buffer.from(message.png));
-		} else {
-			job.reject(new Error(`Failed to render PDF page ${message.page} in isolated renderer: ${message.message}`));
-		}
+		if (message.type === 'result' && job.type === 'render') job.resolve(Buffer.from(message.png));
+		else if (message.type === 'dimensions' && job.type === 'inspect') job.resolve({ width: message.width, height: message.height });
+		else if (message.type === 'error') job.reject(new Error(`PDF page ${message.page}: ${message.message}`));
+		else job.reject(new Error(`Unexpected PDF renderer response type for page ${message.page}`));
 		this.dispatch();
 	}
 
@@ -129,8 +132,7 @@ export class IsolatedPdfRenderer {
 			const job = this.queue.shift();
 			if (!job) return;
 			state.current = job;
-			const request: RenderRequest = { id: job.id, type: 'render', page: job.page, dpi: job.dpi };
-			state.worker.postMessage(request);
+			state.worker.postMessage({ id: job.id, type: job.type, page: job.page, dpi: job.dpi });
 		}
 	}
 
