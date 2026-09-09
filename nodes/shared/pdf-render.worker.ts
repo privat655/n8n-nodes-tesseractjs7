@@ -73,7 +73,8 @@ async function start(): Promise<void> {
 			if (!renderedCanvas || !context) throw new Error('PDF.js did not create a canvas');
 			await page.render({ canvasContext: context, viewport, background: '#ffffff' }).promise;
 			const png = Uint8Array.from(renderedCanvas.toBuffer('image/png'));
-			port.postMessage({ type: 'result', id: message.id, page: message.page, png }, [png.buffer]);
+			// Copy the payload; do not transfer backing-store ownership across isolate teardown.
+			port.postMessage({ type: 'result', id: message.id, page: message.page, png });
 		} catch (error) {
 			port.postMessage({ type: 'error', id: message.id, page: message.page, message: errorMessage(error) });
 		} finally {
