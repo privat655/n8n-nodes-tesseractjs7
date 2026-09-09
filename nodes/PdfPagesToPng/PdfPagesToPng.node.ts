@@ -1,12 +1,14 @@
 import {
-	type IDataObject, type IExecuteFunctions, type INodeExecutionData,
+	type IDataObject, type IExecuteFunctions, type INode, type INodeExecutionData,
 	type INodeType, type INodeTypeDescription, NodeConnectionType, NodeOperationError,
 } from 'n8n-workflow';
 import { IsolatedPdfRenderer } from '../shared/isolated-renderer';
 import { selectPdfPages } from '../shared/pageSelection';
 
-function positiveInteger(value: unknown, name: string): number {
-	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive safe integer`);
+function positiveInteger(value: unknown, name: string, node: INode, itemIndex: number): number {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+		throw new NodeOperationError(node, `${name} must be a positive safe integer`, { itemIndex });
+	}
 	return value;
 }
 async function timedOperation<T>(operation: Promise<T>, page: number, timeout: number): Promise<T> {
@@ -54,22 +56,22 @@ export class PdfPagesToPng implements INodeType {
 			try {
 				const inputField = (this.getNodeParameter('inputDataFieldName', itemIndex, 'data') as string).trim();
 				const outputField = (this.getNodeParameter('outputDataFieldName', itemIndex, 'data') as string).trim();
-				if (!inputField || !outputField) throw new Error('Input and output binary field names must not be empty');
+				if (!inputField || !outputField) throw new NodeOperationError(this.getNode(), 'Input and output binary field names must not be empty', { itemIndex });
 				const sourceBinary = items[itemIndex].binary?.[inputField];
-				if (!sourceBinary) throw new Error(`Binary field "${inputField}" is missing`);
+				if (!sourceBinary) throw new NodeOperationError(this.getNode(), `Binary field "${inputField}" is missing`, { itemIndex });
 				const selection = this.getNodeParameter('pages', itemIndex, '') as string;
 				const dpi = this.getNodeParameter('dpi', itemIndex, 150) as number;
-				if (!Number.isFinite(dpi) || dpi < 36 || dpi > 600) throw new Error('DPI must be between 36 and 600');
+				if (!Number.isFinite(dpi) || dpi < 36 || dpi > 600) throw new NodeOperationError(this.getNode(), 'DPI must be between 36 and 600', { itemIndex });
 				const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
-				const maxInputBytes = positiveInteger(options.maxInputBytes ?? 52428800, 'Max Input Bytes');
-				const maxOutputBytes = positiveInteger(options.maxOutputBytes ?? 134217728, 'Max Output Bytes');
-				const maxPages = positiveInteger(options.maxPages ?? 100, 'Max Pages');
-				const maxPixels = positiveInteger(options.maxPixels ?? 25000000, 'Max Pixels per Page');
-				const renderTimeout = positiveInteger(options.renderTimeoutMs ?? 60000, 'Render Timeout');
-				if (renderTimeout > 300000) throw new Error('Render Timeout must not exceed 300000 ms');
+				const maxInputBytes = positiveInteger(options.maxInputBytes ?? 52428800, 'Max Input Bytes', this.getNode(), itemIndex);
+				const maxOutputBytes = positiveInteger(options.maxOutputBytes ?? 134217728, 'Max Output Bytes', this.getNode(), itemIndex);
+				const maxPages = positiveInteger(options.maxPages ?? 100, 'Max Pages', this.getNode(), itemIndex);
+				const maxPixels = positiveInteger(options.maxPixels ?? 25000000, 'Max Pixels per Page', this.getNode(), itemIndex);
+				const renderTimeout = positiveInteger(options.renderTimeoutMs ?? 60000, 'Render Timeout', this.getNode(), itemIndex);
+				if (renderTimeout > 300000) throw new NodeOperationError(this.getNode(), 'Render Timeout must not exceed 300000 ms', { itemIndex });
 				const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, inputField);
-				if (buffer.length > maxInputBytes) throw new Error(`PDF exceeds Max Input Bytes (${maxInputBytes})`);
-				if (!buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Input does not contain a PDF header');
+				if (buffer.length > maxInputBytes) throw new NodeOperationError(this.getNode(), `PDF exceeds Max Input Bytes (${maxInputBytes})`, { itemIndex });
+				if (!buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new NodeOperationError(this.getNode(), 'Input does not contain a PDF header', { itemIndex });
 
 				// Parse and inspect in the same isolate as rendering; do not load native canvas in n8n's parent isolate.
 				renderer = await IsolatedPdfRenderer.create(buffer, 1);
@@ -78,7 +80,7 @@ export class PdfPagesToPng implements INodeType {
 				for (const pageNumber of selectPdfPages(pageCount, selection, maxPages)) {
 					const { width, height } = await timedOperation(renderer.inspect(pageNumber, dpi), pageNumber, renderTimeout);
 					if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 || width > 32767 || height > 32767 || width * height > maxPixels) {
-						throw new Error(`Page ${pageNumber} raster (${width}x${height}) exceeds the raster limits; reduce DPI`);
+						throw new NodeOperationError(this.getNode(), `Page ${pageNumber} raster (${width}x${height}) exceeds the raster limits; reduce DPI`, { itemIndex });
 					}
 					plan.push({ page: pageNumber, width, height });
 				}
@@ -89,7 +91,7 @@ export class PdfPagesToPng implements INodeType {
 				for (const page of plan) {
 					const png = await timedOperation(renderer.render(page.page, dpi), page.page, renderTimeout);
 					totalBytes += png.length;
-					if (totalBytes > maxOutputBytes) throw new Error(`PNG output exceeds Max Output Bytes (${maxOutputBytes})`);
+					if (totalBytes > maxOutputBytes) throw new NodeOperationError(this.getNode(), `PNG output exceeds Max Output Bytes (${maxOutputBytes})`, { itemIndex });
 					const binary = await this.helpers.prepareBinaryData(png, `${baseName}-page-${page.page}.png`, 'image/png');
 					documentOutput.push({
 						json: { ...items[itemIndex].json,
@@ -103,7 +105,10 @@ export class PdfPagesToPng implements INodeType {
 				output.push(...documentOutput);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				if (!this.continueOnFail()) throw new NodeOperationError(this.getNode(), message, { itemIndex });
+				if (!this.continueOnFail()) {
+					if (error instanceof NodeOperationError) throw error;
+					throw new NodeOperationError(this.getNode(), message, { itemIndex });
+				}
 				output.push({ json: { ...items[itemIndex].json, error: message }, pairedItem: { item: itemIndex } });
 			} finally { if (renderer) await renderer.terminate(); }
 		}
