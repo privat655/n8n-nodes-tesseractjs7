@@ -36,11 +36,9 @@ async function start(): Promise<void> {
 			entry.canvas.height = height;
 		}
 		destroy(entry: CanvasEntry): void {
-			if (!entry.canvas) return;
-			entry.canvas.width = 0;
-			entry.canvas.height = 0;
-			entry.canvas = null;
+			// Release references without resizing a native surface to zero twice.
 			entry.context = null;
+			entry.canvas = null;
 		}
 	}
 
