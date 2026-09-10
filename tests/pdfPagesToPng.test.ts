@@ -51,6 +51,15 @@ function context(buffers = [fixturePdf()], params: Record<string, unknown> = {},
 	return { ctx, saved, reads, items };
 }
 
+async function rgbaAt(png: Buffer, x: number, y: number): Promise<Uint8ClampedArray> {
+	const { createCanvas, loadImage } = await import('@napi-rs/canvas');
+	const image = await loadImage(png);
+	const canvas = createCanvas(image.width, image.height);
+	const context = canvas.getContext('2d');
+	context.drawImage(image, 0, 0);
+	return context.getImageData(x, y, 1, 1).data;
+}
+
 test('renders selected pages into separate binary items with correct rotation and provenance', async () => {
 	const run = context([fixturePdf()], { pages: '3,1-2,2', dpi: 72, inputDataFieldName: 'pdf', outputDataFieldName: 'image' });
 	const [items] = await new PdfPagesToPng().execute.call(run.ctx);
@@ -62,6 +71,7 @@ test('renders selected pages into separate binary items with correct rotation an
 		assert.equal(item.json.marker, 'input-0');
 		assert.equal(item.json.pdf_source_page_count, 3);
 		assert.equal(item.json.pdf_selected_page_count, 3);
+		assert.equal('pdf_region' in item.json, false);
 		assert.deepEqual(item.pairedItem, { item: 0 });
 		assert.deepEqual(Object.keys(item.binary ?? {}), ['image']);
 		assert.equal(item.binary?.image.id, `png-${index + 1}`);
@@ -74,6 +84,22 @@ test('renders selected pages into separate binary items with correct rotation an
 	});
 });
 
+test('renders one percentage region directly from the page at fixed 300 DPI', async () => {
+	const run = context([fixturePdf(1)], { pages: '1', dpi: 72, region: ' pct:20,0,40,100 ' });
+	const [items] = await new PdfPagesToPng().execute.call(run.ctx);
+	assert.equal(items.length, 1);
+	assert.equal(items[0].json.pdf_page_number, 1);
+	assert.equal(items[0].json.pdf_render_dpi, 300);
+	assert.equal(items[0].json.pdf_region, 'pct:20,0,40,100');
+	assert.equal(items[0].json.pdf_source_width, 500);
+	assert.equal(items[0].json.pdf_source_height, 334);
+	assert.equal(items[0].json.pdf_width, 200);
+	assert.equal(items[0].json.pdf_height, 334);
+	assert.equal(run.saved[0].name, 'source-0-page-1-region-20-0-40-100.png');
+	const pixel = await rgbaAt(run.saved[0].bytes, 20, 219);
+	assert.ok(pixel[2] > 200 && pixel[0] < 50 && pixel[1] < 50, `expected blue PDF content in crop, got rgba(${[...pixel].join(',')})`);
+});
+
 test('supports multiple PDFs and links each page to its own input', async () => {
 	const run = context([fixturePdf(1), fixturePdf(1)], { pages: '*' });
 	const [items] = await new PdfPagesToPng().execute.call(run.ctx);
@@ -81,8 +107,16 @@ test('supports multiple PDFs and links each page to its own input', async () => 
 	assert.deepEqual(items.map((item) => item.json.marker), ['input-0', 'input-1']);
 });
 
-test('fails invalid pages, page limits, and raster limits before storing a PNG', async () => {
-	for (const params of [{ pages: '4' }, { pages: '', options: { maxPages: 2 } }, { options: { maxPixels: 1 } }]) {
+test('fails invalid pages, page limits, raster limits, and invalid regions before storing a PNG', async () => {
+	for (const params of [
+		{ pages: '4' },
+		{ pages: '', options: { maxPages: 2 } },
+		{ options: { maxPixels: 1 } },
+		{ pages: '1', region: '70,10,10,10' },
+		{ pages: '1', region: 'pct:95,10,10,10' },
+		{ pages: '1', region: 'pct:10,10,0,10' },
+		{ pages: '1-2', region: 'pct:10,10,10,10' },
+	]) {
 		const run = context([fixturePdf()], params);
 		await assert.rejects(() => new PdfPagesToPng().execute.call(run.ctx));
 		assert.equal(run.saved.length, 0);
