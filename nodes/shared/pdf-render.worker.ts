@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 
-type PageRequest = { id: number; type: 'render' | 'inspect'; page: number; dpi: number };
+type PercentageRegion = { x: number; y: number; width: number; height: number };
+type PageRequest = { id: number; type: 'render' | 'inspect'; page: number; dpi: number; region?: PercentageRegion };
 type WorkerInput = PageRequest | { type: 'shutdown' };
 type PdfCanvas = {
 	width: number; height: number;
@@ -9,7 +10,27 @@ type PdfCanvas = {
 };
 type CanvasEntry = { canvas: PdfCanvas | null; context: CanvasRenderingContext2D | null };
 
+type RenderArea = {
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+	fullWidth: number;
+	fullHeight: number;
+};
+
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+function getRenderArea(viewport: { width: number; height: number }, region?: PercentageRegion): RenderArea {
+	const fullWidth = Math.ceil(viewport.width);
+	const fullHeight = Math.ceil(viewport.height);
+	if (!region) return { left: 0, top: 0, width: fullWidth, height: fullHeight, fullWidth, fullHeight };
+	const left = Math.floor(viewport.width * region.x / 100);
+	const top = Math.floor(viewport.height * region.y / 100);
+	const right = Math.ceil(viewport.width * (region.x + region.width) / 100);
+	const bottom = Math.ceil(viewport.height * (region.y + region.height) / 100);
+	return { left, top, width: right - left, height: bottom - top, fullWidth, fullHeight };
+}
 
 async function start(): Promise<void> {
 	const port = parentPort;
@@ -65,16 +86,24 @@ async function start(): Promise<void> {
 		try {
 			page = await pdf.getPage(message.page);
 			const viewport = page.getViewport({ scale: message.dpi / 72 });
-			const width = Math.ceil(viewport.width);
-			const height = Math.ceil(viewport.height);
+			const area = getRenderArea(viewport, message.region);
 			if (message.type === 'inspect') {
-				port.postMessage({ type: 'dimensions', id: message.id, page: message.page, width, height });
+				port.postMessage({
+					type: 'dimensions', id: message.id, page: message.page,
+					width: area.width, height: area.height,
+					fullWidth: area.fullWidth, fullHeight: area.fullHeight,
+				});
 				return;
 			}
-			entry = pdf.canvasFactory.create(width, height) as CanvasEntry;
+			entry = pdf.canvasFactory.create(area.width, area.height) as CanvasEntry;
 			const { canvas: renderedCanvas, context } = entry;
 			if (!renderedCanvas || !context) throw new Error('PDF.js did not create a canvas');
-			await page.render({ canvasContext: context, viewport, background: '#ffffff' }).promise;
+			await page.render({
+				canvasContext: context,
+				viewport,
+				transform: message.region ? [1, 0, 0, 1, -area.left, -area.top] : undefined,
+				background: '#ffffff',
+			}).promise;
 			const png = Uint8Array.from(renderedCanvas.toBuffer('image/png'));
 			// Copy the payload; do not transfer backing-store ownership across isolate teardown.
 			port.postMessage({ type: 'result', id: message.id, page: message.page, png });
