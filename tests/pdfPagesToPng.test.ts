@@ -3,12 +3,12 @@ import test from 'node:test';
 import type { IExecuteFunctions, INodeExecutionData } from 'n8n-workflow';
 import { PdfPagesToPng } from '../nodes/PdfPagesToPng/PdfPagesToPng.node';
 
-function fixturePdf(count = 3): Buffer {
+function fixturePdf(count = 3, pageWidth = 120, pageHeight = 80): Buffer {
 	const kids = Array.from({ length: count }, (_, index) => `${3 + index * 2} 0 R`).join(' ');
 	const objects = ['<< /Type /Catalog /Pages 2 0 R >>', `<< /Type /Pages /Kids [${kids}] /Count ${count} >>`];
 	for (let index = 0; index < count; index++) {
 		const content = `0 0 1 rg ${10 + index} 10 25 35 re f`;
-		objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 120 80] /Rotate ${index === 1 ? 90 : 0} /Contents ${4 + index * 2} 0 R >>`);
+		objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Rotate ${index === 1 ? 90 : 0} /Contents ${4 + index * 2} 0 R >>`);
 		objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`);
 	}
 	let value = '%PDF-1.4\n';
@@ -85,18 +85,18 @@ test('renders selected pages into separate binary items with correct rotation an
 });
 
 test('renders one percentage region directly from the page at fixed 300 DPI', async () => {
-	const run = context([fixturePdf(1)], { pages: '1', dpi: 72, region: ' pct:20,0,40,100 ' });
+	const run = context([fixturePdf(1, 144, 144)], { pages: '1', dpi: 72, region: ' pct:5,0,30,100 ' });
 	const [items] = await new PdfPagesToPng().execute.call(run.ctx);
 	assert.equal(items.length, 1);
 	assert.equal(items[0].json.pdf_page_number, 1);
 	assert.equal(items[0].json.pdf_render_dpi, 300);
-	assert.equal(items[0].json.pdf_region, 'pct:20,0,40,100');
-	assert.equal(items[0].json.pdf_source_width, 500);
-	assert.equal(items[0].json.pdf_source_height, 334);
-	assert.equal(items[0].json.pdf_width, 200);
-	assert.equal(items[0].json.pdf_height, 334);
-	assert.equal(run.saved[0].name, 'source-0-page-1-region-20-0-40-100.png');
-	const pixel = await rgbaAt(run.saved[0].bytes, 20, 219);
+	assert.equal(items[0].json.pdf_region, 'pct:5,0,30,100');
+	assert.equal(items[0].json.pdf_source_width, 600);
+	assert.equal(items[0].json.pdf_source_height, 600);
+	assert.equal(items[0].json.pdf_width, 180);
+	assert.equal(items[0].json.pdf_height, 600);
+	assert.equal(run.saved[0].name, 'source-0-page-1-region-5-0-30-100.png');
+	const pixel = await rgbaAt(run.saved[0].bytes, 64, 485);
 	assert.ok(pixel[2] > 200 && pixel[0] < 50 && pixel[1] < 50, `expected blue PDF content in crop, got rgba(${[...pixel].join(',')})`);
 });
 
