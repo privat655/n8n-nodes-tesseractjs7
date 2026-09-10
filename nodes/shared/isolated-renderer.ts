@@ -1,8 +1,9 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-export type PageDimensions = { width: number; height: number };
-type JobBase = { id: number; page: number; dpi: number; reject: (error: Error) => void };
+export type PercentageRegion = { x: number; y: number; width: number; height: number };
+export type PageDimensions = { width: number; height: number; fullWidth: number; fullHeight: number };
+type JobBase = { id: number; page: number; dpi: number; region?: PercentageRegion; reject: (error: Error) => void };
 type Job = JobBase & (
 	| { type: 'render'; resolve: (value: Buffer) => void }
 	| { type: 'inspect'; resolve: (value: PageDimensions) => void }
@@ -10,7 +11,7 @@ type Job = JobBase & (
 type WorkerResponse =
 	| { type: 'ready'; pageCount: number }
 	| { type: 'result'; id: number; page: number; png: Uint8Array }
-	| { type: 'dimensions'; id: number; page: number; width: number; height: number }
+	| { type: 'dimensions'; id: number; page: number; width: number; height: number; fullWidth: number; fullHeight: number }
 	| { type: 'error'; id: number; page: number; message: string };
 type WorkerState = { worker: Worker; ready: boolean; current?: Job };
 
@@ -40,18 +41,18 @@ export class IsolatedPdfRenderer {
 		}
 	}
 
-	render(page: number, dpi: number): Promise<Buffer> {
+	render(page: number, dpi: number, region?: PercentageRegion): Promise<Buffer> {
 		if (this.closed) return Promise.reject(new Error('PDF renderer is closed'));
 		return new Promise<Buffer>((resolve, reject) => {
-			this.queue.push({ type: 'render', id: this.nextId++, page, dpi, resolve, reject });
+			this.queue.push({ type: 'render', id: this.nextId++, page, dpi, region, resolve, reject });
 			this.dispatch();
 		});
 	}
 
-	inspect(page: number, dpi: number): Promise<PageDimensions> {
+	inspect(page: number, dpi: number, region?: PercentageRegion): Promise<PageDimensions> {
 		if (this.closed) return Promise.reject(new Error('PDF renderer is closed'));
 		return new Promise<PageDimensions>((resolve, reject) => {
-			this.queue.push({ type: 'inspect', id: this.nextId++, page, dpi, resolve, reject });
+			this.queue.push({ type: 'inspect', id: this.nextId++, page, dpi, region, resolve, reject });
 			this.dispatch();
 		});
 	}
@@ -119,7 +120,9 @@ export class IsolatedPdfRenderer {
 			return;
 		}
 		if (message.type === 'result' && job.type === 'render') job.resolve(Buffer.from(message.png));
-		else if (message.type === 'dimensions' && job.type === 'inspect') job.resolve({ width: message.width, height: message.height });
+		else if (message.type === 'dimensions' && job.type === 'inspect') {
+			job.resolve({ width: message.width, height: message.height, fullWidth: message.fullWidth, fullHeight: message.fullHeight });
+		}
 		else if (message.type === 'error') job.reject(new Error(`PDF page ${message.page}: ${message.message}`));
 		else job.reject(new Error(`Unexpected PDF renderer response type for page ${message.page}`));
 		this.dispatch();
@@ -132,7 +135,7 @@ export class IsolatedPdfRenderer {
 			const job = this.queue.shift();
 			if (!job) return;
 			state.current = job;
-			state.worker.postMessage({ id: job.id, type: job.type, page: job.page, dpi: job.dpi });
+			state.worker.postMessage({ id: job.id, type: job.type, page: job.page, dpi: job.dpi, region: job.region });
 		}
 	}
 
